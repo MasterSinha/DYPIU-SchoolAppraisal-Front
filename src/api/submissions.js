@@ -137,16 +137,19 @@ export const extractAttachments = (tables) => {
   Object.entries(tables || {}).forEach(([tableId, rows]) => {
     (rows || []).forEach((row, rowIndex) => {
       Object.entries(row || {}).forEach(([column, value]) => {
-        if (value && typeof value === "object" && (value.url || value.publicUrl || value.fileName || value.name)) {
+        const files = Array.isArray(value) ? value : [value];
+
+        files.forEach((file) => {
+          if (!file || typeof file !== "object" || !(file.url || file.publicUrl || file.fileName || file.name)) return;
           attachments.push({
             tableId,
             rowIndex,
             column,
-            fileName: value.fileName || value.filename || value.name || "",
-            name: value.name || value.fileName || value.filename || "",
-            url: value.url || value.publicUrl || value.downloadUrl || "",
+            fileName: file.fileName || file.filename || file.name || "",
+            name: file.name || file.fileName || file.filename || "",
+            url: file.url || file.publicUrl || file.downloadUrl || "",
           });
-        }
+        });
       });
     });
   });
@@ -201,6 +204,23 @@ export const uploadAttachment = async (file) => {
     fileName: uploaded.fileName || uploaded.filename || uploaded.name || file.name,
     url: uploaded.url || uploaded.publicUrl || uploaded.downloadUrl || "",
   };
+};
+
+export const uploadAttachments = async (files) => {
+  const selectedFiles = Array.from(files || []);
+  const formData = new FormData();
+  selectedFiles.forEach((file) => formData.append("files", file));
+
+  const { data } = await apiClient.post("/api/attachments/upload-multiple", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+
+  const uploadedFiles = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+  return uploadedFiles.map((uploaded, index) => ({
+    name: uploaded.name || uploaded.fileName || uploaded.filename || selectedFiles[index]?.name || "",
+    fileName: uploaded.fileName || uploaded.filename || uploaded.name || selectedFiles[index]?.name || "",
+    url: uploaded.url || uploaded.publicUrl || uploaded.downloadUrl || "",
+  }));
 };
 
 export const fetchAllSubmissions = () => apiClient.get("/api/submissions/all");

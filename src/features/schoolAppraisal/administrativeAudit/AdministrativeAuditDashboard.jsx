@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
-import { buildSubmissionPayload, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachment, withSubmitterSignOff } from "../../../api/submissions";
+import { buildSubmissionPayload, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff } from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
 import AuditTable from "../components/AuditTable";
 import { columnsWithSerial, serialColumnFor } from "../components/tableHelpers";
@@ -358,11 +358,11 @@ export default function AdministrativeAuditDashboard() {
                   onCellChange={setCellValue}
                   onAddRow={addRow}
                   onDeleteLastRow={deleteLastRow}
-                  onUploadAttachment={async (file) => {
-                    const uploaded = await uploadAttachment(file);
+                  onUploadAttachment={async (files) => {
+                    const uploaded = await uploadAttachments(files);
                     setData((current) => ({
                       ...current,
-                      attachments: [...(current.attachments || []), uploaded],
+                      attachments: [...(current.attachments || []), ...uploaded],
                       lastSavedAt: new Date().toISOString(),
                     }));
                     return uploaded;

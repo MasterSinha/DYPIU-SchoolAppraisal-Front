@@ -1,7 +1,7 @@
 //contains all the schema for academic audit 2025-26 form
 import { useEffect, useMemo, useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
-import { buildSubmissionPayload, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachment, withSubmitterSignOff } from "../../../api/submissions";
+import { buildSubmissionPayload, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff } from "../../../api/submissions";
 import universityLogo from "../../../assets/images/image.png";
 import AuditReportPanel from "./AuditReportPanel";
 import AuditSection from "./AuditSection";
@@ -286,9 +286,9 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
               onTableChange={handleTableChange}
               onAddRow={handleAddRow}
               onDeleteLastRow={handleDeleteLastRow}
-              onUploadAttachment={async (file) => {
-                const uploaded = await uploadAttachment(file);
-                setAttachments((current) => [...current, uploaded]);
+              onUploadAttachment={async (files) => {
+                const uploaded = await uploadAttachments(files);
+                setAttachments((current) => [...current, ...uploaded]);
                 return uploaded;
               }}
             />

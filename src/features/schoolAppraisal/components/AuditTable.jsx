@@ -1,5 +1,6 @@
 //academic & administrative table add rows and delete last row functionality , sr no, table heading(blue)
 import { useState } from "react";
+import { getApiErrorMessage } from "../../../api/client";
 import { columnsWithSerial, serialColumnFor } from "./tableHelpers";
 
 const isAttachmentColumn = (column) => /\b(link|proof|attachment|document|mom)\b/i.test(column);
@@ -30,11 +31,18 @@ export default function AuditTable({
     onCellChange?.(table.id, rowIndex, column, value);
   };
 
-  const handleAttachmentChange = async (rowIndex, column, file) => {
-    if (!file) return;
+  const handleAttachmentChange = async (rowIndex, column, selectedFiles) => {
+    const files = Array.from(selectedFiles || []);
+    if (!files.length) return;
 
     setUploadError("");
-    if (file.size > 10 * 1024 * 1024) {
+    const invalidType = files.find((file) => file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf"));
+    if (invalidType) {
+      setUploadError("Only PDF attachments are allowed.");
+      return;
+    }
+
+    if (files.some((file) => file.size > 10 * 1024 * 1024)) {
       setUploadError("Attachment must be 10MB or smaller.");
       return;
     }
@@ -44,11 +52,16 @@ export default function AuditTable({
 
     try {
       const uploaded = onUploadAttachment
-        ? await onUploadAttachment(file)
-        : { name: file.name, fileName: file.name, url: URL.createObjectURL(file) };
-      handleCellChange(rowIndex, column, uploaded);
+        ? await onUploadAttachment(files)
+        : files.map((file) => ({ name: file.name, fileName: file.name, url: URL.createObjectURL(file) }));
+      const currentFiles = Array.isArray(rows[rowIndex]?.[column])
+        ? rows[rowIndex][column]
+        : rows[rowIndex]?.[column]
+          ? [rows[rowIndex][column]]
+          : [];
+      handleCellChange(rowIndex, column, [...currentFiles, ...uploaded]);
     } catch (error) {
-      setUploadError(error?.response?.data?.message || error?.message || "Attachment upload failed.");
+      setUploadError(getApiErrorMessage(error, "Attachment upload failed."));
     } finally {
       setUploadingCell("");
     }
@@ -115,45 +128,49 @@ export default function AuditTable({
                   <td key={column} style={{ ...styles.td, ...(serialColumnFor([column]) ? styles.serialCell : {}) }}>
                     {isAttachmentColumn(column) ? (
                       <div style={styles.attachmentCell}>
-                        {row[column]?.url ? (
+                        {(Array.isArray(row[column]) ? row[column] : row[column] ? [row[column]] : []).length ? (
                           <div className="audit-attached-file" style={styles.attachedFile}>
-                            <span style={styles.fileSummary}>
-                              <span style={styles.pdfIcon} aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                                  <path d="M6 2.75h8l4 4V21.25H6z" />
-                                  <path d="M14 2.75v4h4" />
-                                </svg>
-                              </span>
-                              <span style={styles.fileDetails}>
-                                <span style={styles.fileName} title={row[column].name || row[column].fileName}>
-                                  {row[column].name || row[column].fileName || "Attached document"}
+                            {(Array.isArray(row[column]) ? row[column] : [row[column]]).map((file, fileIndex) => (
+                              <span key={`${file.url || file.name || "attachment"}-${fileIndex}`} style={styles.fileSummary}>
+                                <span style={styles.pdfIcon} aria-hidden="true">
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                                    <path d="M6 2.75h8l4 4V21.25H6z" />
+                                    <path d="M14 2.75v4h4" />
+                                  </svg>
                                 </span>
-                                <span style={styles.fileType}>PDF document</span>
+                                <span style={styles.fileDetails}>
+                                  <span style={styles.fileName} title={file.name || file.fileName}>
+                                    {file.name || file.fileName || "Attached document"}
+                                  </span>
+                                  <span style={styles.fileType}>PDF document</span>
+                                </span>
+                                {file.url && (
+                                  <a
+                                    className="audit-attachment-view"
+                                    href={file.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={styles.attachmentLink}
+                                    aria-label={`View ${file.name || "attachment"}`}
+                                  >
+                                    View
+                                  </a>
+                                )}
                               </span>
-                            </span>
+                            ))}
                             <span style={styles.fileActions}>
-                              <a
-                                className="audit-attachment-view"
-                                href={row[column].url}
-                                target="_blank"
-                                rel="noreferrer"
-                                style={styles.attachmentLink}
-                                aria-label={`View ${row[column].name || "attachment"}`}
-                              >
-                                View
-                              </a>
                               <label className="audit-attachment-replace" style={styles.replaceButton}>
-                                {uploadingCell === `${rowIndex}-${column}` ? "Uploading..." : "Replace"}
+                                {uploadingCell === `${rowIndex}-${column}` ? "Uploading..." : "Add PDFs"}
                                 <input
                                   type="file"
                                   accept=".pdf,application/pdf"
+                                  multiple
                                   onChange={(event) => {
-                                    const file = event.target.files?.[0];
-                                    handleAttachmentChange(rowIndex, column, file);
+                                    handleAttachmentChange(rowIndex, column, event.target.files);
                                     event.target.value = "";
                                   }}
                                   style={styles.fileInput}
-                                  aria-label={`Replace ${table.title} ${column}`}
+                                  aria-label={`Add attachments to ${table.title} ${column}`}
                                   disabled={uploadingCell === `${rowIndex}-${column}`}
                                 />
                               </label>
@@ -175,13 +192,13 @@ export default function AuditTable({
                               <path d="m7 9 5-5 5 5" />
                               <path d="M5 20h14" />
                             </svg>
-                            <span>{uploadingCell === `${rowIndex}-${column}` ? "Uploading..." : "Attach PDF"}</span>
+                            <span>{uploadingCell === `${rowIndex}-${column}` ? "Uploading..." : "Attach PDFs"}</span>
                             <input
                               type="file"
                               accept=".pdf,application/pdf"
+                              multiple
                               onChange={(event) => {
-                                const file = event.target.files?.[0];
-                                handleAttachmentChange(rowIndex, column, file);
+                                handleAttachmentChange(rowIndex, column, event.target.files);
                                 event.target.value = "";
                               }}
                               style={styles.fileInput}

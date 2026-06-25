@@ -143,6 +143,11 @@ function ReportFieldsTable({ fields, values }) {
 
 function ReportCellValue({ value }) {
   if (!value) return "-";
+  if (Array.isArray(value)) {
+    return value.length ? (
+      <div>{value.map((file, index) => <ReportCellValue key={`${file?.url || file?.name || "attachment"}-${index}`} value={file} />)}</div>
+    ) : "-";
+  }
   if (typeof value !== "object") return isOmittedReportText(value) ? "-" : String(value);
   const name = value.name || value.fileName || value.filename || "View attachment";
   const url = value.url || value.publicUrl || value.downloadUrl;

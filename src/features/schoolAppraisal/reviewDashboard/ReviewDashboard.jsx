@@ -73,7 +73,11 @@ const groupTabs = [
 ];
 
 const initialsFor = (name = "") => name.split(" ").filter(Boolean).map((word) => word[0]).join("").slice(0, 2).toUpperCase();
-const isAttachmentValue = (value) => value && typeof value === "object" && (value.url || value.name);
+const isAttachmentValue = (value) =>
+  value &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  (value.url || value.publicUrl || value.downloadUrl || value.name || value.fileName);
 
 const blocksFor = (section) =>
   section.blocks || [
@@ -869,12 +873,26 @@ function ReadOnlyTable({ table, rows, values }) {
 }
 
 function renderValue(value) {
+  if (Array.isArray(value)) {
+    return value.length ? (
+      <div style={styles.attachmentList}>
+        {value.map((file, index) => (
+          <div key={`${file?.url || file?.name || "attachment"}-${index}`} style={styles.attachmentItem}>
+            {renderValue(file)}
+          </div>
+        ))}
+      </div>
+    ) : "-";
+  }
+
   if (isAttachmentValue(value)) {
+    const name = value.name || value.fileName || value.filename || "Attachment";
+    const url = value.url || value.publicUrl || value.downloadUrl;
     return (
       <div style={styles.attachmentPreview}>
-        <span>{value.name || "Attachment"}</span>
-        {value.url ? (
-          <a href={value.url} target="_blank" rel="noreferrer" style={styles.attachmentLink}>
+        <span>{name}</span>
+        {url ? (
+          <a href={url} target="_blank" rel="noreferrer" style={styles.attachmentLink}>
             View Attachment
           </a>
         ) : (
