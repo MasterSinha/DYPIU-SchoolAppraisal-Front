@@ -4,7 +4,9 @@ import { createUser, deleteUser, fetchUsers, updateUser } from "../../../api/use
 import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS } from "./userManagementConfig";
 
 const emptyForm = {
+  accountType: "user",
   category: "",
+  auditorType: "",
   school: "",
   post: "",
   name: "",
@@ -24,8 +26,20 @@ const normalizeList = (payload) => {
 
 const normalizeUser = (user = {}, index = 0) => {
   const role = String(user.role || "").toLowerCase().replaceAll("_", "-");
+  const accountType = String(user.accountType || user.userType || user.type || (role.includes("auditor") ? "auditor" : "user")).toLowerCase().replaceAll("_", "-");
+  const auditorType = String(user.auditorType || user.auditorCategory || (
+    role.includes("external")
+      ? "external"
+      : role.includes("internal")
+        ? "internal"
+        : ""
+  )).toLowerCase().replaceAll("_", "-");
   const category = user.category || (
-    role === "director"
+    role.includes("academic")
+      ? "academic"
+      : role.includes("administrative")
+        ? "administrative"
+        : role === "director"
       ? "academic"
       : role === "administrative"
         ? "administrative"
@@ -38,8 +52,12 @@ const normalizeUser = (user = {}, index = 0) => {
     id: user.id || user.userId || user.email || `user-${index}`,
     name: user.name || user.fullName || "-",
     email: user.email || user.username || "-",
+    accountType,
+    auditorType,
     category,
-    role: role || (category === "academic" ? "director" : "administrative"),
+    role: accountType === "auditor"
+      ? (user.auditorRole || `${category}-${auditorType || "internal"}-auditor`)
+      : (role || (category === "academic" ? "director" : "administrative")),
     assignment: category === "academic"
       ? (user.school || user.schoolName || "-")
       : (designation || "-"),
@@ -48,6 +66,17 @@ const normalizeUser = (user = {}, index = 0) => {
 };
 
 const postLabelFor = (value) => ADMINISTRATIVE_POSTS.find((post) => post.value === value)?.label || value;
+const titleCase = (value = "") => String(value).replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const roleForForm = (form) => form.accountType === "auditor"
+  ? (form.category === "academic" ? "director" : "administrative")
+  : form.category === "academic"
+    ? "director"
+    : "administrative";
+const auditorRoleForForm = (form) => `${form.category}-${form.auditorType}-auditor`;
+const designationForForm = (form) => {
+  if (form.accountType === "auditor") return `${titleCase(form.auditorType)} ${titleCase(form.category)} Auditor`;
+  return form.category === "academic" ? "Director" : postLabelFor(form.post);
+};
 
 const formatDate = (date = new Date()) =>
   new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(date);
@@ -55,6 +84,7 @@ const formatDate = (date = new Date()) =>
 function validate(form) {
   const errors = {};
   if (!form.category) errors.category = "Select Academic or Administrative.";
+  if (form.accountType === "auditor" && !form.auditorType) errors.auditorType = "Select Internal or External auditor.";
   if (form.category === "academic" && !form.school) errors.school = "Select a school.";
   if (form.category === "administrative" && !form.post) errors.post = "Select an administrative post.";
   if (!form.name.trim()) errors.name = "Enter the user's name.";
@@ -70,6 +100,7 @@ function validate(form) {
 function validateEdit(form) {
   const errors = {};
   if (!form.category) errors.category = "Select Academic or Administrative.";
+  if (form.accountType === "auditor" && !form.auditorType) errors.auditorType = "Select Internal or External auditor.";
   if (form.category === "academic" && !form.school) errors.school = "Select a school.";
   if (form.category === "administrative" && !form.post) errors.post = "Select an administrative post.";
   if (!form.name.trim()) errors.name = "Enter the user's name.";
@@ -87,7 +118,9 @@ const editFormFromUser = (user = {}) => {
   )?.value || "";
 
   return {
+    accountType: user.accountType === "auditor" ? "auditor" : "user",
     category,
+    auditorType: user.accountType === "auditor" ? (user.auditorType || "internal") : "",
     school: category === "academic" ? (user.school || user.schoolName || user.assignment || "") : "",
     post: category === "administrative" ? postValue : "",
     name: user.name === "-" ? "" : user.name || "",
@@ -118,6 +151,7 @@ export default function UserManagementPanel() {
     total: users.length,
     academic: users.filter((user) => user.category === "academic").length,
     administrative: users.filter((user) => user.category === "administrative").length,
+    auditors: users.filter((user) => user.accountType === "auditor").length,
     active: users.filter((user) => user.status === "active").length,
   }), [users]);
 
@@ -151,10 +185,23 @@ export default function UserManagementPanel() {
     setForm((current) => ({
       ...current,
       [field]: value,
+      ...(field === "accountType" ? { category: "", auditorType: "", school: "", post: "" } : {}),
       ...(field === "category" ? { school: "", post: "" } : {}),
     }));
-    setErrors((current) => ({ ...current, [field]: "", ...(field === "category" ? { school: "", post: "" } : {}) }));
+    setErrors((current) => ({
+      ...current,
+      [field]: "",
+      ...(field === "accountType" ? { category: "", auditorType: "", school: "", post: "" } : {}),
+      ...(field === "category" ? { school: "", post: "" } : {}),
+    }));
     setStatus("");
+  };
+
+  const openCreateForm = (accountType) => {
+    setForm({ ...emptyForm, accountType });
+    setErrors({});
+    setStatus("");
+    setShowForm(true);
   };
 
   const closeForm = () => {
@@ -172,10 +219,15 @@ export default function UserManagementPanel() {
 
     const isAcademic = form.category === "academic";
     const payload = {
+      accountType: form.accountType,
+      userType: form.accountType,
       category: form.category,
-      role: isAcademic ? "director" : "administrative",
+      auditCategory: form.category,
+      auditorType: form.accountType === "auditor" ? form.auditorType : null,
+      auditorRole: form.accountType === "auditor" ? auditorRoleForForm(form) : null,
+      role: roleForForm(form),
       school: isAcademic ? form.school : "Administrative Office",
-      designation: isAcademic ? "Director" : postLabelFor(form.post),
+      designation: designationForForm(form),
       post: isAcademic ? null : form.post,
       name: form.name.trim(),
       email: form.email.trim().toLowerCase(),
@@ -189,7 +241,7 @@ export default function UserManagementPanel() {
       const { data } = await createUser(payload);
       const created = data?.data?.user || data?.user || data?.data || data || payload;
       setUsers((current) => [normalizeUser({ ...payload, ...created }), ...current]);
-      setStatus("User account created successfully.");
+      setStatus(`${form.accountType === "auditor" ? "Auditor" : "User"} account created successfully.`);
       setForm(emptyForm);
       setErrors({});
       setShowForm(false);
@@ -217,10 +269,16 @@ export default function UserManagementPanel() {
     setEditForm((current) => ({
       ...current,
       [field]: value,
+      ...(field === "accountType" ? { category: "", auditorType: "", school: "", post: "" } : {}),
       ...(field === "category" ? { school: "", post: "" } : {}),
       ...(field === "password" && !value ? { confirmPassword: "" } : {}),
     }));
-    setEditErrors((current) => ({ ...current, [field]: "", ...(field === "category" ? { school: "", post: "" } : {}) }));
+    setEditErrors((current) => ({
+      ...current,
+      [field]: "",
+      ...(field === "accountType" ? { category: "", auditorType: "", school: "", post: "" } : {}),
+      ...(field === "category" ? { school: "", post: "" } : {}),
+    }));
     setStatus("");
   };
 
@@ -252,10 +310,15 @@ export default function UserManagementPanel() {
 
     const isAcademic = editForm.category === "academic";
     const payload = {
+      accountType: editForm.accountType,
+      userType: editForm.accountType,
       category: editForm.category,
-      role: isAcademic ? "director" : "administrative",
+      auditCategory: editForm.category,
+      auditorType: editForm.accountType === "auditor" ? editForm.auditorType : null,
+      auditorRole: editForm.accountType === "auditor" ? auditorRoleForForm(editForm) : null,
+      role: roleForForm(editForm),
       school: isAcademic ? editForm.school : "Administrative Office",
-      designation: isAcademic ? "Director" : postLabelFor(editForm.post),
+      designation: designationForForm(editForm),
       post: isAcademic ? null : editForm.post,
       name: editForm.name.trim(),
       email: editForm.email.trim().toLowerCase(),
@@ -290,14 +353,14 @@ export default function UserManagementPanel() {
         <div>
           <p style={styles.kicker}>IQAC access only</p>
           <h2 style={styles.title}>User Management</h2>
-          <p style={styles.description}>View Academic and Administrative users or create a new account.</p>
+          <p style={styles.description}>View Academic, Administrative and auditor accounts or create a new account.</p>
         </div>
         <div style={styles.headingActions}>
           <button type="button" className="btn btn-secondary user-management-no-print" onClick={handlePrintUsers} disabled={loading || !users.length}>
             <span aria-hidden="true">⎙</span>
             Print Users
           </button>
-          <button type="button" className="btn btn-primary user-management-no-print" onClick={() => setShowForm((open) => !open)}>
+          <button type="button" className="btn btn-primary user-management-no-print" onClick={() => showForm ? closeForm() : openCreateForm("user")}>
             {showForm ? "Close Form" : "+ Add New User"}
           </button>
         </div>
@@ -306,31 +369,47 @@ export default function UserManagementPanel() {
       {showForm && (
         <form style={styles.formCard} onSubmit={handleCreate}>
           <div style={styles.formHeading}>
-            <h3 style={styles.formTitle}>Create New User</h3>
-            <span style={styles.formHint}>Choose the user category first.</span>
+            <div>
+              <h3 style={styles.formTitle}>Create {form.accountType === "auditor" ? "Auditor" : "User"} Credentials</h3>
+              <span style={styles.formHint}>Fill assignment details first, then enter login credentials.</span>
+            </div>
+            <span style={form.accountType === "auditor" ? styles.auditorPill : styles.userPill}>
+              {form.accountType === "auditor" ? "Auditor Account" : "Regular User"}
+            </span>
           </div>
 
-          <div className="user-management-category-grid" style={styles.categoryGrid}>
-            {[
-              { value: "academic", label: "Academic", detail: "Director assigned to a school" },
-              { value: "administrative", label: "Administrative", detail: "Registrar, HR, DSW or Placement" },
-            ].map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                style={{ ...styles.categoryCard, ...(form.category === option.value ? styles.activeCategoryCard : {}) }}
-                onClick={() => updateField("category", option.value)}
-              >
-                <strong>{option.label}</strong>
-                <span>{option.detail}</span>
-              </button>
-            ))}
-          </div>
-          {errors.category && <span style={styles.errorText}>{errors.category}</span>}
-
-          {form.category && (
+          <div style={styles.formSection}>
+            <div style={styles.formSectionHeader}>
+              <h4 style={styles.sectionTitle}>Assignment Details</h4>
+              <span style={styles.sectionHint}>{form.accountType === "auditor" ? "Set audit category and auditor type." : "Set user category and assignment."}</span>
+            </div>
             <div className="user-management-field-grid" style={styles.fieldGrid}>
-              {form.category === "academic" ? (
+              <Field label="Account Type">
+                <select className="audit-control" style={styles.control} value={form.accountType} onChange={(event) => updateField("accountType", event.target.value)}>
+                  <option value="user">Regular User</option>
+                  <option value="auditor">Auditor</option>
+                </select>
+              </Field>
+
+              <Field label={form.accountType === "auditor" ? "Audit Category" : "User Category"} error={errors.category}>
+                <select className="audit-control" style={styles.control} value={form.category} onChange={(event) => updateField("category", event.target.value)}>
+                  <option value="">Select category</option>
+                  <option value="academic">Academic</option>
+                  <option value="administrative">Administrative</option>
+                </select>
+              </Field>
+
+              {form.accountType === "auditor" && (
+                <Field label="Auditor Type" error={errors.auditorType}>
+                  <select className="audit-control" style={styles.control} value={form.auditorType} onChange={(event) => updateField("auditorType", event.target.value)}>
+                    <option value="">Select auditor type</option>
+                    <option value="internal">Internal</option>
+                    <option value="external">External</option>
+                  </select>
+                </Field>
+              )}
+
+              {form.category === "academic" && (
                 <Field label="School" error={errors.school}>
                   <select className="audit-control" style={styles.control} value={form.school} onChange={(event) => updateField("school", event.target.value)}>
                     <option value="">Select school</option>
@@ -341,7 +420,9 @@ export default function UserManagementPanel() {
                     ))}
                   </select>
                 </Field>
-              ) : (
+              )}
+
+              {form.category === "administrative" && (
                 <Field label="Administrative Post" error={errors.post}>
                   <select className="audit-control" style={styles.control} value={form.post} onChange={(event) => updateField("post", event.target.value)}>
                     <option value="">Select post</option>
@@ -349,7 +430,15 @@ export default function UserManagementPanel() {
                   </select>
                 </Field>
               )}
+            </div>
+          </div>
 
+          <div style={styles.formSection}>
+            <div style={styles.formSectionHeader}>
+              <h4 style={styles.sectionTitle}>Credential Details</h4>
+              <span style={styles.sectionHint}>These details will be used for login.</span>
+            </div>
+            <div className="user-management-field-grid" style={styles.fieldGrid}>
               <Field label="Name" error={errors.name}>
                 <input className="audit-control" style={styles.control} value={form.name} onChange={(event) => updateField("name", event.target.value)} placeholder="Enter full name" />
               </Field>
@@ -366,11 +455,11 @@ export default function UserManagementPanel() {
                 <input className="audit-control" style={styles.control} type="password" value={form.confirmPassword} onChange={(event) => updateField("confirmPassword", event.target.value)} placeholder="Re-enter password" />
               </Field>
             </div>
-          )}
+          </div>
 
           <div style={styles.formActions}>
             <button type="button" className="btn btn-secondary" onClick={closeForm}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={creating || !form.category}>
+            <button type="submit" className="btn btn-primary" disabled={creating || !form.category || (form.accountType === "auditor" && !form.auditorType)}>
               {creating ? "Creating..." : "Create Account"}
             </button>
           </div>
@@ -384,10 +473,11 @@ export default function UserManagementPanel() {
         <div style={styles.tableHeading}>
           <div>
             <h3 style={styles.formTitle}>All Users</h3>
-            <p style={styles.tableSubtext}>Manage every Academic, Administrative and authority account from one place.</p>
+            <p style={styles.tableSubtext}>Manage every Academic, Administrative, auditor and authority account from one place.</p>
           </div>
           <div style={styles.tableBadges}>
             <span style={styles.count}>{userStats.total} users</span>
+            <span style={styles.count}>{userStats.auditors} auditors</span>
             <span style={styles.printHint}>Print-ready report available</span>
           </div>
         </div>
@@ -396,18 +486,23 @@ export default function UserManagementPanel() {
           <table style={styles.table}>
             <thead>
               <tr>
-                {["Name", "Email", "Category", "School / Post", "Role", "Status", "Action"].map((column) => (
+                {["Name", "Email", "Account", "Category", "School / Post", "Role", "Status", "Action"].map((column) => (
                   <th key={column} style={styles.th}>{column}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="7" style={styles.emptyCell}>Loading users...</td></tr>
+                <tr><td colSpan="8" style={styles.emptyCell}>Loading users...</td></tr>
               ) : users.length ? users.map((user) => (
                 <tr key={user.id}>
                   <td style={styles.td}><strong>{user.name}</strong></td>
                   <td style={styles.td}>{user.email}</td>
+                  <td style={{ ...styles.td, ...styles.centerCell }}>
+                    <span style={user.accountType === "auditor" ? styles.auditorPill : styles.userPill}>
+                      {user.accountType === "auditor" ? `${titleCase(user.auditorType)} Auditor` : "User"}
+                    </span>
+                  </td>
                   <td style={{ ...styles.td, ...styles.centerCell }}><span style={styles.categoryPill}>{user.category}</span></td>
                   <td style={styles.td}>{user.assignment}</td>
                   <td style={{ ...styles.td, ...styles.centerCell }}>{user.role}</td>
@@ -450,7 +545,7 @@ export default function UserManagementPanel() {
                   </td>
                 </tr>
               )) : (
-                <tr><td colSpan="7" style={styles.emptyCell}>No users are available yet.</td></tr>
+                <tr><td colSpan="8" style={styles.emptyCell}>No users are available yet.</td></tr>
               )}
             </tbody>
           </table>
@@ -514,26 +609,38 @@ export default function UserManagementPanel() {
               </div>
             </div>
 
-            <div style={styles.editCategoryGrid}>
-              {[
-                { value: "academic", label: "Academic", detail: "Director assigned to a school" },
-                { value: "administrative", label: "Administrative", detail: "Registrar, HR, DSW or Placement" },
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  style={{ ...styles.categoryCard, ...(editForm.category === option.value ? styles.activeCategoryCard : {}) }}
-                  onClick={() => updateEditField("category", option.value)}
-                >
-                  <strong>{option.label}</strong>
-                  <span>{option.detail}</span>
-                </button>
-              ))}
-            </div>
-            {editErrors.category && <span style={styles.errorText}>{editErrors.category}</span>}
+            <div style={styles.formSection}>
+              <div style={styles.formSectionHeader}>
+                <h4 style={styles.sectionTitle}>Assignment Details</h4>
+                <span style={styles.sectionHint}>Update account type, category and assignment.</span>
+              </div>
+              <div style={styles.editFieldGrid}>
+                <Field label="Account Type">
+                  <select className="audit-control" style={styles.control} value={editForm.accountType} onChange={(event) => updateEditField("accountType", event.target.value)}>
+                    <option value="user">Regular User</option>
+                    <option value="auditor">Auditor</option>
+                  </select>
+                </Field>
 
-            <div style={styles.editFieldGrid}>
-              {editForm.category === "academic" ? (
+                <Field label={editForm.accountType === "auditor" ? "Audit Category" : "User Category"} error={editErrors.category}>
+                  <select className="audit-control" style={styles.control} value={editForm.category} onChange={(event) => updateEditField("category", event.target.value)}>
+                    <option value="">Select category</option>
+                    <option value="academic">Academic</option>
+                    <option value="administrative">Administrative</option>
+                  </select>
+                </Field>
+
+                {editForm.accountType === "auditor" && (
+                  <Field label="Auditor Type" error={editErrors.auditorType}>
+                    <select className="audit-control" style={styles.control} value={editForm.auditorType} onChange={(event) => updateEditField("auditorType", event.target.value)}>
+                      <option value="">Select auditor type</option>
+                      <option value="internal">Internal</option>
+                      <option value="external">External</option>
+                    </select>
+                  </Field>
+                )}
+
+                {editForm.category === "academic" && (
                 <Field label="School" error={editErrors.school}>
                   <select className="audit-control" style={styles.control} value={editForm.school} onChange={(event) => updateEditField("school", event.target.value)}>
                     <option value="">Select school</option>
@@ -544,15 +651,25 @@ export default function UserManagementPanel() {
                     ))}
                   </select>
                 </Field>
-              ) : (
+                )}
+
+                {editForm.category === "administrative" && (
                 <Field label="Administrative Post" error={editErrors.post}>
                   <select className="audit-control" style={styles.control} value={editForm.post} onChange={(event) => updateEditField("post", event.target.value)}>
                     <option value="">Select post</option>
                     {ADMINISTRATIVE_POSTS.map((post) => <option key={post.value} value={post.value}>{post.label}</option>)}
                   </select>
                 </Field>
-              )}
+                )}
+              </div>
+            </div>
 
+            <div style={styles.formSection}>
+              <div style={styles.formSectionHeader}>
+                <h4 style={styles.sectionTitle}>Credential Details</h4>
+                <span style={styles.sectionHint}>Leave password blank to keep the existing password.</span>
+              </div>
+              <div style={styles.editFieldGrid}>
               <Field label="Name" error={editErrors.name}>
                 <input className="audit-control" style={styles.control} value={editForm.name} onChange={(event) => updateEditField("name", event.target.value)} placeholder="Enter full name" />
               </Field>
@@ -568,6 +685,7 @@ export default function UserManagementPanel() {
               <Field label="Confirm New Password" error={editErrors.confirmPassword}>
                 <input className="audit-control" style={styles.control} type="password" value={editForm.confirmPassword} onChange={(event) => updateEditField("confirmPassword", event.target.value)} placeholder="Required only when changing password" disabled={!editForm.password} />
               </Field>
+              </div>
             </div>
 
             <div style={styles.modalActions}>
@@ -607,7 +725,7 @@ function PrintableUsersReport({ users, stats }) {
           <ReportStat label="Total Users" value={stats.total} />
           <ReportStat label="Academic" value={stats.academic} />
           <ReportStat label="Administrative" value={stats.administrative} />
-          <ReportStat label="Active" value={stats.active} />
+          <ReportStat label="Auditors" value={stats.auditors} />
         </div>
 
         <div className="user-report-section-heading">
@@ -624,6 +742,7 @@ function PrintableUsersReport({ users, stats }) {
               <th>Sr No</th>
               <th>Name</th>
               <th>Email</th>
+              <th>Account</th>
               <th>Category</th>
               <th>School / Post</th>
               <th>Role</th>
@@ -635,13 +754,14 @@ function PrintableUsersReport({ users, stats }) {
                 <td>{index + 1}</td>
                 <td>{user.name}</td>
                 <td>{user.email}</td>
+                <td>{user.accountType === "auditor" ? `${titleCase(user.auditorType)} Auditor` : "User"}</td>
                 <td>{user.category}</td>
                 <td>{user.assignment}</td>
                 <td>{user.role}</td>
               </tr>
             )) : (
               <tr>
-                <td colSpan="6">No users are available.</td>
+                <td colSpan="7">No users are available.</td>
               </tr>
             )}
           </tbody>
@@ -686,9 +806,10 @@ const styles = {
   formHeading: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, paddingBottom: 14, borderBottom: "1px solid #edf1f6" },
   formTitle: { margin: 0, color: "#0f172a", fontSize: 17, fontWeight: 700 },
   formHint: { color: "#64748b", fontSize: 11 },
-  categoryGrid: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 },
-  categoryCard: { display: "flex", flexDirection: "column", gap: 4, padding: "14px 16px", border: "1px solid #d7dee9", borderRadius: 10, color: "#334155", background: "#fbfcfe", cursor: "pointer", textAlign: "left", fontFamily: "inherit" },
-  activeCategoryCard: { borderColor: "#2563eb", color: "#1d4ed8", background: "#eff6ff", boxShadow: "0 0 0 3px rgba(37,99,235,.08)" },
+  formSection: { display: "flex", flexDirection: "column", gap: 14, padding: 16, border: "1px solid #e5ebf3", borderRadius: 12, background: "#fbfcfe" },
+  formSectionHeader: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, paddingBottom: 10, borderBottom: "1px solid #edf1f6" },
+  sectionTitle: { margin: 0, color: "#0f172a", fontSize: 13, fontWeight: 800 },
+  sectionHint: { color: "#64748b", fontSize: 11.5 },
   fieldGrid: { display: "grid", gridTemplateColumns: "repeat(2, minmax(240px, 1fr))", gap: "18px 16px" },
   field: { display: "flex", flexDirection: "column", gap: 6 },
   label: { color: "#334155", fontSize: 12, fontWeight: 650 },
@@ -712,6 +833,8 @@ const styles = {
   actionCell: { width: 96, textAlign: "center" },
   emptyCell: { padding: 28, color: "#64748b", fontSize: 12, textAlign: "center" },
   categoryPill: { textTransform: "capitalize", color: "#1d4ed8", fontWeight: 700 },
+  userPill: { display: "inline-flex", padding: "4px 7px", borderRadius: 999, color: "#475569", background: "#f1f5f9", fontSize: 10.5, fontWeight: 750, textTransform: "capitalize" },
+  auditorPill: { display: "inline-flex", padding: "4px 7px", borderRadius: 999, color: "#7c2d12", background: "#ffedd5", fontSize: 10.5, fontWeight: 750, textTransform: "capitalize" },
   activeStatus: { display: "inline-flex", padding: "4px 7px", borderRadius: 999, color: "#166534", background: "#dcfce7", fontSize: 10.5, fontWeight: 700, textTransform: "capitalize" },
   inactiveStatus: { display: "inline-flex", padding: "4px 7px", borderRadius: 999, color: "#991b1b", background: "#fee2e2", fontSize: 10.5, fontWeight: 700, textTransform: "capitalize" },
   actionGroup: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 0, padding: 3, border: "1px solid #dbe4f0", borderRadius: 12, background: "#f8fafc", boxShadow: "inset 0 1px 0 rgba(255,255,255,.9)" },

@@ -8,8 +8,10 @@ import {
   getSubmissionSignOff,
   parseSubmissionFormData,
   reviewSubmission,
+  updateSubmissionById,
   withApproverSignOff,
 } from "../../../api/submissions";
+import { fetchUsers } from "../../../api/users";
 import universityLogo from "../../../assets/images/image.png";
 import AppSidebar from "../components/AppSidebar";
 import AuditReportPanel from "../components/AuditReportPanel";
@@ -100,6 +102,50 @@ const responseList = (payload) => {
   return [];
 };
 const submissionPayload = (payload) => payload?.data?.submission || payload?.data || payload;
+const userList = (payload) => {
+  const data = payload?.data ?? payload;
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.content)) return data.content;
+  if (Array.isArray(data?.users)) return data.users;
+  if (Array.isArray(data?.items)) return data.items;
+  return [];
+};
+const normalizeUserRole = (value = "") => String(value).trim().toLowerCase().replaceAll("_", "-");
+const normalizeAuditAssignment = (value = "") => String(value).trim().toLowerCase();
+const normalizeAuditor = (user = {}, index = 0) => {
+  const role = normalizeUserRole(user.role || user.auditorRole);
+  const accountType = normalizeUserRole(user.accountType || user.userType || user.type || (role.includes("auditor") ? "auditor" : ""));
+  const auditorType = normalizeUserRole(user.auditorType || user.auditorCategory || (
+    role.includes("external") ? "external" : role.includes("internal") ? "internal" : ""
+  ));
+  const category = normalizeUserRole(user.category || user.auditCategory || (
+    role.includes("administrative") ? "administrative" : role.includes("academic") || role === "director" ? "academic" : ""
+  ));
+  const designation = user.designation || user.post || "";
+
+  return {
+    ...user,
+    id: user.id || user.userId || user.email || `auditor-${index}`,
+    name: user.name || user.fullName || "-",
+    email: user.email || user.username || "-",
+    accountType,
+    auditorType,
+    category,
+    school: user.school || user.schoolName || "",
+    assignment: category === "academic" ? (user.school || user.schoolName || "") : (designation || ""),
+    designation,
+  };
+};
+const matchesSubmissionAssignment = (auditor, submission) => {
+  if (auditor.accountType !== "auditor" || auditor.category !== submission.auditType) return false;
+  if (submission.auditType === "academic") {
+    return normalizeAuditAssignment(auditor.school || auditor.assignment) === normalizeAuditAssignment(submission.school);
+  }
+
+  const submissionPost = normalizeAuditAssignment(submission.submittedByDesignation || submission.post || submission.department || submission.school);
+  const auditorPost = normalizeAuditAssignment(auditor.post || auditor.designation || auditor.assignment);
+  return Boolean(submissionPost && auditorPost && (auditorPost === submissionPost || auditorPost.includes(submissionPost) || submissionPost.includes(auditorPost)));
+};
 
 const normalizeSubmission = (submission = {}) => {
   const auditType = normalizeAuditType(submission.auditType || submission.type);
@@ -122,6 +168,10 @@ const normalizeSubmission = (submission = {}) => {
     reviewedByDesignation: signOff.approvedBy.designation,
     reviewedByRole: signOff.approvedBy.role,
     reviewedOn: signOff.approvedBy.date,
+    forwardedToAuditorId: submission.forwardedToAuditorId || submission.auditorId || "",
+    forwardedToAuditorName: submission.forwardedToAuditorName || submission.auditorName || "",
+    forwardedToAuditorEmail: submission.forwardedToAuditorEmail || submission.auditorEmail || "",
+    forwardedAuditorType: normalizeUserRole(submission.forwardedAuditorType || submission.auditorType || ""),
     sections: submission.sections || sectionsForAudit(auditType),
     attachments: formData.attachments.length ? formData.attachments : submission.attachments || [],
     status: normalizeStatus(submission.status),
@@ -140,6 +190,11 @@ export default function ReviewDashboard() {
   const [reviewingStatus, setReviewingStatus] = useState("");
   const [error, setError] = useState("");
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [auditors, setAuditors] = useState([]);
+  const [loadingAuditors, setLoadingAuditors] = useState(false);
+  const [forwardTarget, setForwardTarget] = useState(null);
+  const [forwardAuditorType, setForwardAuditorType] = useState("");
+  const [forwardingId, setForwardingId] = useState("");
   const role = String(sessionStorage.getItem("role") || "iqac").toLowerCase().replaceAll("_", "-");
   const canManageUsers = role === "iqac";
   const roleConfig = REVIEW_ROLE_CONFIG[role] || REVIEW_ROLE_CONFIG.iqac;
@@ -268,6 +323,62 @@ export default function ReviewDashboard() {
     navigate("/login", { replace: true });
   };
 
+  const openForwardModal = async (submission) => {
+    setForwardTarget(submission);
+    setForwardAuditorType(submission.forwardedAuditorType || "");
+    setError("");
+
+    if (auditors.length) return;
+
+    setLoadingAuditors(true);
+    try {
+      const { data } = await fetchUsers();
+      setAuditors(userList(data).map(normalizeAuditor).filter((user) => user.accountType === "auditor"));
+    } catch (loadError) {
+      setError(getApiErrorMessage(loadError, "Could not load auditor accounts."));
+    } finally {
+      setLoadingAuditors(false);
+    }
+  };
+
+  const closeForwardModal = () => {
+    setForwardTarget(null);
+    setForwardAuditorType("");
+    setForwardingId("");
+  };
+
+  const forwardToAuditor = async (auditor) => {
+    if (!forwardTarget?.id || !auditor?.id) return;
+
+    setForwardingId(auditor.id);
+    setError("");
+
+    const payload = {
+      status: backendStatusFor("under-review"),
+      forwardedToAuditorId: auditor.id,
+      forwardedToAuditorName: auditor.name,
+      forwardedToAuditorEmail: auditor.email,
+      forwardedAuditorType: auditor.auditorType,
+      forwardedAuditCategory: auditor.category,
+      forwardedAt: new Date().toISOString(),
+    };
+
+    try {
+      await updateSubmissionById(forwardTarget.id, payload);
+      updateSubmission(forwardTarget.auditType, forwardTarget.id, {
+        status: "under-review",
+        forwardedToAuditorId: auditor.id,
+        forwardedToAuditorName: auditor.name,
+        forwardedToAuditorEmail: auditor.email,
+        forwardedAuditorType: auditor.auditorType,
+      });
+      closeForwardModal();
+    } catch (forwardError) {
+      setError(getApiErrorMessage(forwardError, "Could not forward this submission to the selected auditor."));
+      setForwardingId("");
+    }
+  };
+
   return (
     <>
       <PrintStyles />
@@ -341,6 +452,7 @@ export default function ReviewDashboard() {
               activeGroup={activeGroup.academic}
               onGroupChange={(group) => setActiveGroup((current) => ({ ...current, academic: group }))}
               onOpen={openSubmission}
+              onForward={canManageUsers ? openForwardModal : null}
               loading={loadingSubmissions}
             />
           )}
@@ -352,11 +464,24 @@ export default function ReviewDashboard() {
               activeGroup={activeGroup.administrative}
               onGroupChange={(group) => setActiveGroup((current) => ({ ...current, administrative: group }))}
               onOpen={openSubmission}
+              onForward={canManageUsers ? openForwardModal : null}
               loading={loadingSubmissions}
             />
           )}
         </main>
 
+        {forwardTarget && (
+          <ForwardAuditorModal
+            submission={forwardTarget}
+            auditors={auditors}
+            loading={loadingAuditors}
+            selectedType={forwardAuditorType}
+            onTypeChange={setForwardAuditorType}
+            forwardingId={forwardingId}
+            onForward={forwardToAuditor}
+            onCancel={closeForwardModal}
+          />
+        )}
         {showLogoutModal && <LogoutModal onCancel={() => setShowLogoutModal(false)} onConfirm={handleLogout} />}
       </div>
     </>
@@ -520,7 +645,7 @@ function SchoolProgressPanel({ schools, loading }) {
   );
 }
 
-function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, onOpen, loading }) {
+function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, onOpen, onForward, loading }) {
   const filtered = activeGroup === "all" ? submissions : submissions.filter((submission) => submission.group === activeGroup);
   const counts = {
     all: submissions.length,
@@ -559,6 +684,7 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
             key={submission.id}
             submission={submission}
             onOpen={() => onOpen(submission)}
+            onForward={onForward ? () => onForward(submission) : null}
           />
         ))}
       </div>
@@ -566,7 +692,7 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
   );
 }
 
-function SubmissionCard({ submission, onOpen }) {
+function SubmissionCard({ submission, onOpen, onForward }) {
   return (
     <article className="app-surface-card review-submission-card" style={styles.submissionCard}>
       <div style={styles.submissionTop}>
@@ -588,7 +714,20 @@ function SubmissionCard({ submission, onOpen }) {
         <InfoPill label="Attachments" value={submission.attachments.length} />
       </div>
 
+      {submission.forwardedToAuditorName && (
+        <div style={styles.forwardedNotice}>
+          <span>Forwarded to {submission.forwardedAuditorType ? `${submission.forwardedAuditorType} auditor` : "auditor"}</span>
+          <strong>{submission.forwardedToAuditorName}</strong>
+          <small>{submission.forwardedToAuditorEmail}</small>
+        </div>
+      )}
+
       <div style={styles.cardActions}>
+        {onForward && (
+          <button type="button" className="btn btn-secondary" onClick={onForward}>
+            {submission.forwardedToAuditorName ? "Change Auditor" : "Forward to Auditor"}
+          </button>
+        )}
         <button type="button" className="btn btn-secondary" onClick={onOpen}>View Form</button>
       </div>
     </article>
@@ -951,6 +1090,92 @@ function StatusBadge({ status }) {
     <span style={{ ...styles.statusBadge, color: tone.color, background: tone.background, borderColor: tone.border }}>
       {statusLabels[status] || status}
     </span>
+  );
+}
+
+function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTypeChange, forwardingId, onForward, onCancel }) {
+  const matchingAuditors = selectedType
+    ? auditors.filter((auditor) => auditor.auditorType === selectedType && matchesSubmissionAssignment(auditor, submission))
+    : [];
+  const assignmentLabel = submission.auditType === "academic"
+    ? submission.school
+    : (submission.submittedByDesignation || submission.school || "Administrative submission");
+
+  return (
+    <div style={styles.modalBackdrop} onClick={onCancel}>
+      <div style={styles.forwardModal} onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="forward-auditor-title">
+        <div style={styles.modalHeader}>
+          <div>
+            <p style={styles.kicker}>Auditor review</p>
+            <h3 id="forward-auditor-title" style={styles.modalTitle}>Forward submission to auditor</h3>
+            <p style={styles.modalMeta}>
+              {auditLabels[submission.auditType]} - {assignmentLabel}
+            </p>
+          </div>
+          <StatusBadge status={submission.status} />
+        </div>
+
+        <div style={styles.forwardStep}>
+          <h4 style={styles.forwardStepTitle}>1. Choose auditor type</h4>
+          <div style={styles.forwardTypeRow}>
+            {[
+              { value: "internal", label: "Internal" },
+              { value: "external", label: "External" },
+            ].map((type) => (
+              <button
+                key={type.value}
+                type="button"
+                style={{ ...styles.forwardTypeButton, ...(selectedType === type.value ? styles.activeForwardTypeButton : {}) }}
+                onClick={() => onTypeChange(type.value)}
+              >
+                {type.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={styles.forwardStep}>
+          <h4 style={styles.forwardStepTitle}>2. Assign respective auditor</h4>
+          {!selectedType ? (
+            <div style={styles.emptyDraftNotice}>Select Internal or External to view matching auditors.</div>
+          ) : loading ? (
+            <div style={styles.emptyDraftNotice}>Loading auditor accounts...</div>
+          ) : matchingAuditors.length ? (
+            <div style={styles.auditorList}>
+              {matchingAuditors.map((auditor) => (
+                <button
+                  key={auditor.id}
+                  type="button"
+                  style={styles.auditorOption}
+                  onClick={() => onForward(auditor)}
+                  disabled={Boolean(forwardingId)}
+                >
+                  <span style={styles.auditorAvatar}>{initialsFor(auditor.name)}</span>
+                  <span style={styles.auditorOptionBody}>
+                    <strong>{auditor.name}</strong>
+                    <small>{auditor.email}</small>
+                    <small>{submission.auditType === "academic" ? auditor.school : auditor.assignment}</small>
+                  </span>
+                  <span style={styles.auditorAssignText}>
+                    {forwardingId === auditor.id ? "Forwarding..." : "Assign"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={styles.errorNotice}>
+              No {selectedType} auditor is assigned for {assignmentLabel}. Create the auditor account from User Management with the same {submission.auditType === "academic" ? "school" : "administrative post"}.
+            </div>
+          )}
+        </div>
+
+        <div style={styles.modalActions}>
+          <button type="button" onClick={onCancel} style={styles.cancelButton} disabled={Boolean(forwardingId)}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1388,6 +1613,16 @@ const styles = {
     color: "#64748b",
     fontSize: 11,
   },
+  forwardedNotice: {
+    display: "grid",
+    gap: 3,
+    padding: "10px 12px",
+    border: "1px solid #bae6fd",
+    borderRadius: 10,
+    color: "#075985",
+    background: "#f0f9ff",
+    fontSize: 11.5,
+  },
   remarksLabel: {
     display: "flex",
     flexDirection: "column",
@@ -1526,6 +1761,18 @@ const styles = {
     padding: "26px 28px",
     boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
   },
+  forwardModal: {
+    width: "min(720px, 94vw)",
+    maxHeight: "90vh",
+    overflowY: "auto",
+    background: "#fff",
+    borderRadius: 16,
+    padding: 22,
+    display: "flex",
+    flexDirection: "column",
+    gap: 18,
+    boxShadow: "0 24px 70px rgba(0,0,0,0.28)",
+  },
   reviewModal: {
     width: "min(1040px, 96vw)",
     maxHeight: "92vh",
@@ -1567,6 +1814,85 @@ const styles = {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
     gap: 16,
+  },
+  forwardStep: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    padding: 14,
+    border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    background: "#fbfcfe",
+  },
+  forwardStepTitle: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: 850,
+  },
+  forwardTypeRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 10,
+  },
+  forwardTypeButton: {
+    minHeight: 44,
+    border: "1px solid #d7dee9",
+    borderRadius: 9,
+    color: "#334155",
+    background: "#fff",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: 12.5,
+    fontWeight: 800,
+  },
+  activeForwardTypeButton: {
+    borderColor: "#2563eb",
+    color: "#1d4ed8",
+    background: "#eff6ff",
+    boxShadow: "0 0 0 2px rgba(37,99,235,.1)",
+  },
+  auditorList: {
+    display: "grid",
+    gap: 10,
+  },
+  auditorOption: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: 12,
+    border: "1px solid #dbe4f0",
+    borderRadius: 12,
+    color: "#0f172a",
+    background: "#fff",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    textAlign: "left",
+  },
+  auditorAvatar: {
+    width: 38,
+    height: 38,
+    flex: "0 0 38px",
+    display: "grid",
+    placeItems: "center",
+    borderRadius: 12,
+    color: "#fff",
+    background: "linear-gradient(135deg, #2563eb, #0ea5e9)",
+    fontSize: 11,
+    fontWeight: 900,
+  },
+  auditorOptionBody: {
+    minWidth: 0,
+    display: "flex",
+    flex: 1,
+    flexDirection: "column",
+    gap: 2,
+  },
+  auditorAssignText: {
+    color: "#1d4ed8",
+    fontSize: 12,
+    fontWeight: 850,
   },
   formViewer: {
     display: "flex",
