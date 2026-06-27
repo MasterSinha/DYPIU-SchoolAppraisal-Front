@@ -1,4 +1,3 @@
-//main dashboard for administrative audit 2025-26 form, contains sidebar, header, summary metrics, and module panel with fields and tables
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../../../api/client";
@@ -75,6 +74,7 @@ const getUserProfile = () => ({
 
 export default function AdministrativeAuditDashboard() {
   const navigate = useNavigate();
+  const academicYear = sessionStorage.getItem("academicYear") || administrativeAuditMeta.academicYear;
   const [activeModuleId, setActiveModuleId] = useState(administrativeUserModules[0].id);
   const [reportMode, setReportMode] = useState(false);
   const [printReportAfterRender, setPrintReportAfterRender] = useState(false);
@@ -280,11 +280,12 @@ export default function AdministrativeAuditDashboard() {
             activeModuleId={activeModuleId}
             setActiveModuleId={handleModuleChange}
             profile={profile}
+            academicYear={academicYear}
             onLogout={() => setShowLogoutModal(true)}
           />
           <main className="admin-audit-main" style={styles.main}>
             <AdministrativeReportPanel
-              meta={administrativeAuditMeta}
+              meta={{ ...administrativeAuditMeta, academicYear }}
               modules={administrativeUserModules}
               data={data}
               onClose={() => setReportMode(false)}
@@ -304,6 +305,7 @@ export default function AdministrativeAuditDashboard() {
           activeModuleId={activeModuleId}
           setActiveModuleId={handleModuleChange}
           profile={profile}
+          academicYear={academicYear}
           onLogout={() => setShowLogoutModal(true)}
         />
 
@@ -316,7 +318,7 @@ export default function AdministrativeAuditDashboard() {
                 <h1 style={styles.title}>{administrativeAuditMeta.title}</h1>
                 <p style={styles.meta}>{administrativeAuditMeta.address}</p>
                 <p style={styles.meta}>{administrativeAuditMeta.act}</p>
-                <p style={styles.year}>Academic Year {administrativeAuditMeta.academicYear}</p>
+                <p style={styles.year}>Academic Year {academicYear}</p>
               </div>
             </div>
             <div className="admin-audit-actions" style={styles.headerActions}>
@@ -456,13 +458,14 @@ function PrintStyles() {
   );
 }
 
-function Sidebar({ activeModuleId, setActiveModuleId, profile, onLogout }) {
+function Sidebar({ activeModuleId, setActiveModuleId, profile, academicYear, onLogout }) {
   return (
     <AppSidebar
       title="Administrative Audit"
       subtitle="School Appraisal"
       badge="AA"
       roleTitle="Administrative Module"
+      academicYear={academicYear}
       roleText="Registrar · HR · DSW · Placement"
       items={administrativeUserModules}
       activeId={activeModuleId}
