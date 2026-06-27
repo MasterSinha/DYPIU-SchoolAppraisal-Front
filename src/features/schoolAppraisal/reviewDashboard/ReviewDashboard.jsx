@@ -5,6 +5,7 @@ import {
   SIGN_OFF_FIELD,
   buildSubmissionPayload,
   createNextAuditCycle,
+  downloadSubmissionAttachments,
   fetchAllSubmissions,
   fetchSubmissionById,
   fetchSubmissionSnapshots,
@@ -94,6 +95,25 @@ const groupTabs = [
 
 const initialsFor = (name = "") => name.split(" ").filter(Boolean).map((word) => word[0]).join("").slice(0, 2).toUpperCase();
 const titleCase = (value = "") => String(value).replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const safeArchiveName = (value = "") => String(value).trim().replace(/[<>:"/\\|?*]+/g, "_").replace(/\s+/g, "_");
+const archiveFileName = (submission, headers = {}) => {
+  const disposition = headers["content-disposition"] || headers.get?.("content-disposition") || "";
+  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+  if (encodedName) {
+    try {
+      return decodeURIComponent(encodedName);
+    } catch {
+      return encodedName;
+    }
+  }
+  if (plainName) return plainName;
+
+  const owner = submission.auditType === "academic"
+    ? submission.school
+    : submission.submittedByDesignation || submission.school;
+  return `${submission.auditType === "academic" ? "Academic" : "Administrative"}_${safeArchiveName(owner)}_${safeArchiveName(submission.auditCycle || "Attachments")}.zip`;
+};
 const isAttachmentValue = (value) =>
   value &&
   typeof value === "object" &&
@@ -335,6 +355,7 @@ const normalizeSubmission = (submission = {}) => {
     auditCycle: submission.auditCycle || submission.cycleLabel || submission.auditPeriod || archiveMetadata.auditCycle || "2025-26",
     version: Number(submission.version || submission.reportVersion || submission.cycleVersion || archiveMetadata.version || 1),
     parentSubmissionId: submission.parentSubmissionId || submission.previousSubmissionId || null,
+    hasNextCycle: Boolean(submission.hasNextCycle || submission.nextCycleStarted || submission.nextVersionId),
     sections: submission.sections || sectionsForAudit(auditType),
     attachments: formData.attachments.length ? formData.attachments : submission.attachments || [],
     status: normalizeStatus(submission.status),
@@ -377,6 +398,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [approvalTarget, setApprovalTarget] = useState(null);
   const [approvalCategory, setApprovalCategory] = useState("");
   const [startingNextCycleId, setStartingNextCycleId] = useState("");
+  const [downloadingAttachmentsId, setDownloadingAttachmentsId] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const canManageUsers = role === "iqac";
   const roleConfig = isAuditor ? REVIEW_ROLE_CONFIG.auditor : REVIEW_ROLE_CONFIG[role] || REVIEW_ROLE_CONFIG.iqac;
@@ -507,31 +529,23 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     }
   };
 
-  const confirmStatusChange = async (submission, status, reportCategory = "") => {
-    const action = status === "approved" ? "approve" : "send back";
-    const ok = status === "approved" || window.confirm(`Do you want to ${action} ${submission.school} ${auditLabels[submission.auditType]}?`);
-    if (!ok) return;
-
-    setReviewingStatus(status);
+  const approveSubmission = async (submission, reportCategory) => {
+    setReviewingStatus("approved");
     setError("");
 
     try {
       const reviewedOn = new Date().toISOString();
       const reviewer = { ...profile, role };
-      const baseSignedValues = status === "approved"
-        ? withApproverSignOff(submission.values, reviewer, reviewedOn)
-        : submission.values;
-      const signedValues = status === "approved"
-        ? {
-            ...baseSignedValues,
-            [REPORT_ARCHIVE_FIELD]: {
-              category: reportCategory,
-              auditCycle: submission.auditCycle,
-              version: submission.version,
-              approvedOn: reviewedOn,
-            },
-          }
-        : baseSignedValues;
+      const baseSignedValues = withApproverSignOff(submission.values, reviewer, reviewedOn);
+      const signedValues = {
+        ...baseSignedValues,
+        [REPORT_ARCHIVE_FIELD]: {
+          category: reportCategory,
+          auditCycle: submission.auditCycle,
+          version: submission.version,
+          approvedOn: reviewedOn,
+        },
+      };
       const { valuesData, tablesData, attachments } = buildSubmissionPayload({
         auditType: submission.auditType,
         values: signedValues,
@@ -540,34 +554,30 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       });
 
       await reviewSubmission(submission.id, {
-        status: backendStatusFor(status),
+        status: backendStatusFor("approved"),
         remarks: submission.remarks,
-        ...(status === "approved" ? {
-          reportCategory: reportCategory.toUpperCase(),
-          auditCycle: submission.auditCycle,
-          version: submission.version,
-          valuesData,
-          tablesData,
-          attachments,
-        } : {}),
+        reportCategory: reportCategory.toUpperCase(),
+        auditCycle: submission.auditCycle,
+        version: submission.version,
+        valuesData,
+        tablesData,
+        attachments,
       });
 
       updateSubmission(submission.auditType, submission.id, {
-        status,
+        status: "approved",
         values: signedValues,
-        reviewedBy: status === "approved" ? profile.name : submission.reviewedBy,
-        reviewedByDesignation: status === "approved" ? profile.designation : submission.reviewedByDesignation,
-        reviewedByRole: status === "approved" ? role : submission.reviewedByRole,
-        reviewedOn: status === "approved" ? reviewedOn : submission.reviewedOn,
-        reportCategory: status === "approved" ? reportCategory : submission.reportCategory,
+        reviewedBy: profile.name,
+        reviewedByDesignation: profile.designation,
+        reviewedByRole: role,
+        reviewedOn,
+        reportCategory,
       });
 
-      if (status === "approved") {
-        setApprovalTarget(null);
-        setApprovalCategory("");
-        setSelectedSubmission(null);
-        setActiveView("previous-reports");
-      }
+      setApprovalTarget(null);
+      setApprovalCategory("");
+      setSelectedSubmission(null);
+      setActiveView("previous-reports");
     } catch (reviewError) {
       setError(getApiErrorMessage(reviewError, "Could not update review status."));
     } finally {
@@ -585,7 +595,11 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   };
 
   const startNextAuditCycle = async (submission) => {
-    const nextAuditorType = submission.reportCategory === "internal" ? "external" : "internal";
+    if (submission.reportCategory !== "internal" || Number(submission.version) !== 1 || submission.hasNextCycle) {
+      setError("Only an Internal Audit Version 1 report without an existing successor can start the next cycle.");
+      return;
+    }
+
     const ok = window.confirm(
       `Start the next audit cycle for ${submission.school}? The approved Version ${submission.version} report will remain unchanged.`,
     );
@@ -595,7 +609,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     setError("");
     try {
       await createNextAuditCycle(submission.id, {
-        nextAuditorType,
+        nextAuditorType: "external",
         previousApprovedSubmissionId: submission.id,
         nextVersion: Number(submission.version || 1) + 1,
       });
@@ -605,6 +619,32 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
       setError(getApiErrorMessage(cycleError, "Could not start the next audit cycle."));
     } finally {
       setStartingNextCycleId("");
+    }
+  };
+
+  const handleDownloadAttachments = async (submission) => {
+    setDownloadingAttachmentsId(submission.id);
+    setError("");
+
+    try {
+      const response = await downloadSubmissionAttachments(submission.id);
+      const archive = response.data instanceof Blob
+        ? response.data
+        : new Blob([response.data], { type: "application/zip" });
+      if (!archive.size) throw new Error("The attachment archive is empty.");
+
+      const objectUrl = window.URL.createObjectURL(archive);
+      const downloadLink = document.createElement("a");
+      downloadLink.href = objectUrl;
+      downloadLink.download = archiveFileName(submission, response.headers);
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      downloadLink.remove();
+      window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
+    } catch (downloadError) {
+      setError(getApiErrorMessage(downloadError, "Could not download the attachment archive."));
+    } finally {
+      setDownloadingAttachmentsId("");
     }
   };
 
@@ -769,7 +809,6 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               onBack={() => setSelectedSubmission(null)}
               onRemarksChange={(remarks) => updateSubmission(selectedSubmission.auditType, selectedSubmission.id, { remarks })}
               onApprove={() => openApprovalModal(selectedSubmission)}
-              onSendBack={() => confirmStatusChange(selectedSubmission, "sent-back")}
               onCompleteAuditorReview={(values) => completeAuditorReview(selectedSubmission, values)}
               reviewingStatus={reviewingStatus}
               canApprove={!isAuditor && isAuditorCompleted(selectedSubmission)}
@@ -796,6 +835,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               submissions={auditorReviewedSubmissions}
               loading={loadingSubmissions}
               onOpen={openSubmission}
+              onDownload={handleDownloadAttachments}
+              downloadingAttachmentsId={downloadingAttachmentsId}
             />
           ) : visibleActiveView === "previous-reports" ? (
             <PreviousReportsPanel
@@ -804,6 +845,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               onOpen={openSubmission}
               onStartNextCycle={startNextAuditCycle}
               startingNextCycleId={startingNextCycleId}
+              onDownload={handleDownloadAttachments}
+              downloadingAttachmentsId={downloadingAttachmentsId}
             />
           ) : null}
 
@@ -818,6 +861,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               onGroupChange={(group) => setActiveGroup((current) => ({ ...current, academic: group }))}
               onOpen={openSubmission}
               onForward={canManageUsers ? openForwardModal : null}
+              onDownload={!isAuditor ? handleDownloadAttachments : null}
+              downloadingAttachmentsId={downloadingAttachmentsId}
               loading={loadingSubmissions}
             />
           )}
@@ -830,6 +875,8 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
               onGroupChange={(group) => setActiveGroup((current) => ({ ...current, administrative: group }))}
               onOpen={openSubmission}
               onForward={canManageUsers ? openForwardModal : null}
+              onDownload={!isAuditor ? handleDownloadAttachments : null}
+              downloadingAttachmentsId={downloadingAttachmentsId}
               loading={loadingSubmissions}
             />
           )}
@@ -853,7 +900,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
             selectedCategory={approvalCategory}
             onCategoryChange={setApprovalCategory}
             approving={reviewingStatus === "approved"}
-            onApprove={() => confirmStatusChange(approvalTarget, "approved", approvalCategory)}
+            onApprove={() => approveSubmission(approvalTarget, approvalCategory)}
             onCancel={() => {
               setApprovalTarget(null);
               setApprovalCategory("");
@@ -1024,7 +1071,7 @@ function SchoolProgressPanel({ schools, loading }) {
   );
 }
 
-function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, onOpen, onForward, loading }) {
+function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, onOpen, onForward, onDownload, downloadingAttachmentsId, loading }) {
   const filtered = activeGroup === "all" ? submissions : submissions.filter((submission) => submission.group === activeGroup);
   const counts = {
     all: submissions.length,
@@ -1064,6 +1111,8 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
             submission={submission}
             onOpen={() => onOpen(submission)}
             onForward={onForward ? () => onForward(submission) : null}
+            onDownload={onDownload ? () => onDownload(submission) : null}
+            downloadingAttachments={downloadingAttachmentsId === submission.id}
           />
         ))}
       </div>
@@ -1071,7 +1120,7 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
   );
 }
 
-function AuditorFinalReviewPanel({ submissions, loading, onOpen }) {
+function AuditorFinalReviewPanel({ submissions, loading, onOpen, onDownload, downloadingAttachmentsId }) {
   return (
     <section style={styles.panel}>
       <div style={styles.pageTitleRow}>
@@ -1091,6 +1140,8 @@ function AuditorFinalReviewPanel({ submissions, loading, onOpen }) {
             key={`${submission.auditType}-${submission.id}`}
             submission={submission}
             onOpen={() => onOpen(submission)}
+            onDownload={() => onDownload(submission)}
+            downloadingAttachments={downloadingAttachmentsId === submission.id}
           />
         ))}
       </div>
@@ -1098,7 +1149,20 @@ function AuditorFinalReviewPanel({ submissions, loading, onOpen }) {
   );
 }
 
-function PreviousReportsPanel({ submissions, loading, onOpen, onStartNextCycle, startingNextCycleId }) {
+function PreviousReportsPanel({ submissions, loading, onOpen, onStartNextCycle, startingNextCycleId, onDownload, downloadingAttachmentsId }) {
+  const [activeAuditType, setActiveAuditType] = useState("all");
+  const auditTypeTabs = [
+    { id: "all", label: "All Reports" },
+    { id: "academic", label: "Academic" },
+    { id: "administrative", label: "Administrative" },
+  ];
+  const filteredSubmissions = activeAuditType === "all"
+    ? submissions
+    : submissions.filter((submission) => submission.auditType === activeAuditType);
+  const sectionTitle = activeAuditType === "all"
+    ? "All Audit Reports"
+    : `${titleCase(activeAuditType)} Audit Reports`;
+
   return (
     <section style={styles.panel}>
       <div style={styles.pageTitleRow}>
@@ -1109,26 +1173,127 @@ function PreviousReportsPanel({ submissions, loading, onOpen, onStartNextCycle, 
         <span style={styles.schoolCount}>{submissions.length} reports</span>
       </div>
 
-      <div style={styles.reviewList}>
-        {loading && <SkeletonList rows={3} />}
-        {!loading && !submissions.length && (
-          <div style={styles.emptyDraftNotice}>No approved reports are available yet.</div>
-        )}
-        {submissions.map((submission) => (
-          <SubmissionCard
-            key={`${submission.auditType}-${submission.id}`}
-            submission={submission}
-            onOpen={() => onOpen(submission)}
-            onStartNextCycle={() => onStartNextCycle(submission)}
-            startingNextCycle={startingNextCycleId === submission.id}
+      {loading && <SkeletonList rows={3} />}
+      {!loading && !submissions.length && (
+        <div style={styles.emptyDraftNotice}>No approved reports are available yet.</div>
+      )}
+
+      {!loading && submissions.length > 0 && (
+        <div style={styles.previousReportGroups}>
+          <div style={styles.tabs} role="tablist" aria-label="Previous report types">
+            {auditTypeTabs.map((tab) => {
+              const count = tab.id === "all"
+                ? submissions.length
+                : submissions.filter((submission) => submission.auditType === tab.id).length;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeAuditType === tab.id}
+                  style={{ ...styles.tab, ...(activeAuditType === tab.id ? styles.activeTab : {}) }}
+                  onClick={() => setActiveAuditType(tab.id)}
+                >
+                  {tab.label}
+                  <span style={styles.tabCount}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <PreviousReportAuditSection
+            key={activeAuditType}
+            title={sectionTitle}
+            reports={filteredSubmissions}
+            onOpen={onOpen}
+            onStartNextCycle={onStartNextCycle}
+            startingNextCycleId={startingNextCycleId}
+            onDownload={onDownload}
+            downloadingAttachmentsId={downloadingAttachmentsId}
           />
-        ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PreviousReportAuditSection({
+  title,
+  reports,
+  onOpen,
+  onStartNextCycle,
+  startingNextCycleId,
+  onDownload,
+  downloadingAttachmentsId,
+}) {
+  const [activeCategory, setActiveCategory] = useState("internal");
+  const categoryTabs = [
+    { id: "internal", label: "Internal Audit" },
+    { id: "external", label: "External Audit" },
+  ];
+  const filteredReports = reports.filter((submission) => submission.reportCategory === activeCategory);
+
+  return (
+    <section style={styles.previousReportGroup}>
+      <div style={styles.previousReportSectionTitleRow}>
+        <h3 style={styles.previousReportSectionTitle}>{title}</h3>
+        <span style={styles.schoolCount}>{reports.length} reports</span>
+      </div>
+
+      <div style={styles.tabs} role="tablist" aria-label={`${title} categories`}>
+        {categoryTabs.map((tab) => {
+          const count = reports.filter((submission) => submission.reportCategory === tab.id).length;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeCategory === tab.id}
+              style={{ ...styles.tab, ...(activeCategory === tab.id ? styles.activeTab : {}) }}
+              onClick={() => setActiveCategory(tab.id)}
+            >
+              {tab.label}
+              <span style={styles.tabCount}>{count}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={styles.reviewList}>
+        {!filteredReports.length && (
+          <div style={styles.previousReportEmpty}>No {activeCategory} audit reports.</div>
+        )}
+        {filteredReports.map((submission) => {
+          const canStartNextCycle =
+            activeCategory === "internal" &&
+            Number(submission.version) === 1 &&
+            !submission.hasNextCycle;
+          return (
+            <SubmissionCard
+              key={`${submission.auditType}-${submission.id}`}
+              submission={submission}
+              onOpen={() => onOpen(submission)}
+              onStartNextCycle={canStartNextCycle ? () => onStartNextCycle(submission) : null}
+              startingNextCycle={startingNextCycleId === submission.id}
+              onDownload={() => onDownload(submission)}
+              downloadingAttachments={downloadingAttachmentsId === submission.id}
+            />
+          );
+        })}
       </div>
     </section>
   );
 }
 
-function SubmissionCard({ submission, onOpen, onForward, onStartNextCycle, startingNextCycle }) {
+function SubmissionCard({
+  submission,
+  onOpen,
+  onForward,
+  onStartNextCycle,
+  startingNextCycle,
+  onDownload,
+  downloadingAttachments,
+}) {
   const forwardedAuditorCount = submission.forwardedToAuditorNames?.length || submission.forwardedToAuditorIds?.length || 0;
   return (
     <article className="app-surface-card review-submission-card" style={styles.submissionCard}>
@@ -1149,6 +1314,7 @@ function SubmissionCard({ submission, onOpen, onForward, onStartNextCycle, start
         <InfoPill label="Submitted on" value={formatDate(submission.submittedOn)} />
         <InfoPill label="Sections" value={submission.sections.length} />
         <InfoPill label="Attachments" value={submission.attachments.length} />
+        {isApprovedReport(submission) && <InfoPill label="Audit type" value={auditLabels[submission.auditType]} />}
         {isApprovedReport(submission) && <InfoPill label="Audit category" value={`${titleCase(submission.reportCategory || "unclassified")} Audit`} />}
         {isApprovedReport(submission) && <InfoPill label="Cycle / Version" value={`${submission.auditCycle} / V${submission.version}`} />}
       </div>
@@ -1174,7 +1340,19 @@ function SubmissionCard({ submission, onOpen, onForward, onStartNextCycle, start
         {onStartNextCycle && (
           <button type="button" className="btn btn-primary" onClick={onStartNextCycle} disabled={startingNextCycle} aria-busy={startingNextCycle}>
             {startingNextCycle && <InlineSpinner label="Starting next audit cycle" />}
-            {startingNextCycle ? "Creating next cycle..." : "Start Next Audit Cycle"}
+            {startingNextCycle ? "Creating next cycle..." : "Forward to External auditor"}
+          </button>
+        )}
+        {onDownload && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={onDownload}
+            disabled={downloadingAttachments}
+            aria-busy={downloadingAttachments}
+          >
+            {downloadingAttachments && <InlineSpinner label="Preparing attachment archive" />}
+            {downloadingAttachments ? "Preparing ZIP..." : "Download Attachments"}
           </button>
         )}
         <button type="button" className="btn btn-secondary" onClick={onOpen}>View Form</button>
@@ -1188,7 +1366,6 @@ function FullFormReview({
   onBack,
   onRemarksChange,
   onApprove,
-  onSendBack,
   onCompleteAuditorReview,
   reviewingStatus,
   canApprove,
@@ -1339,27 +1516,21 @@ function FullFormReview({
                     className="audit-control"
                     value={submission.remarks}
                     onChange={(event) => onRemarksChange(event.target.value)}
-                    placeholder="Write remarks before approving or sending back"
+                    placeholder="Write final approval remarks"
                     style={{ ...styles.remarksInput, minHeight: 120 }}
                   />
                 </label>
                 <div style={styles.finalActionRow}>
                   <span style={styles.reviewHint}>
                     {canApprove
-                      ? "Approve and Send Back are enabled after remarks are written."
+                      ? "Approval is enabled after final remarks are written."
                       : "Auditor remarks are required before final review actions are available."}
                   </span>
                   <div style={styles.cardActions}>
-                  <>
                     <button type="button" className="btn btn-primary" onClick={onApprove} disabled={!canApprove || !hasRemarks || Boolean(reviewingStatus)} aria-busy={reviewingStatus === "approved"}>
                       {reviewingStatus === "approved" && <InlineSpinner label="Approving form" />}
                       {reviewingStatus === "approved" ? "Approving..." : "Approve"}
                     </button>
-                    <button type="button" className="btn btn-danger" onClick={onSendBack} disabled={!canApprove || !hasRemarks || Boolean(reviewingStatus)} aria-busy={reviewingStatus === "sent-back"}>
-                      {reviewingStatus === "sent-back" && <InlineSpinner label="Sending form back" />}
-                      {reviewingStatus === "sent-back" ? "Sending..." : "Send Back"}
-                    </button>
-                  </>
                   </div>
                 </div>
               </>
@@ -2253,8 +2424,44 @@ const styles = {
   },
   reviewList: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(360px, 100%), 1fr))",
     gap: 16,
+  },
+  previousReportGroups: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 28,
+  },
+  previousReportGroup: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 18,
+    padding: "22px 0 6px",
+    borderTop: "1px solid #dbe3ef",
+  },
+  previousReportSectionTitleRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+    paddingBottom: 14,
+    borderBottom: "1px solid #edf1f6",
+  },
+  previousReportSectionTitle: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: 18,
+    fontWeight: 800,
+    lineHeight: 1.3,
+  },
+  previousReportEmpty: {
+    border: "1px dashed #cbd5e1",
+    borderRadius: 8,
+    color: "#64748b",
+    background: "#f8fafc",
+    padding: "18px 14px",
+    fontSize: 12,
+    textAlign: "center",
   },
   submissionCard: {
     border: "1px solid #e2e8f0",

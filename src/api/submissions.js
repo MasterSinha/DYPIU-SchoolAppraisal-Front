@@ -253,6 +253,10 @@ export const fetchAllSubmissions = () => apiClient.get("/api/submissions/all");
 export const fetchSubmissionById = (id) => apiClient.get(`/api/submissions/${id}`);
 export const fetchSubmissionSnapshots = (id) => apiClient.get(`/api/submissions/${id}/snapshots`);
 export const reviewSubmission = (id, payload) => apiClient.post(`/api/submissions/${id}/review`, payload);
+export const downloadSubmissionAttachments = (id) =>
+  apiClient.get(`/api/submissions/${id}/attachments/download`, {
+    responseType: "blob",
+  });
 export const createNextAuditCycle = (id, payload = {}) =>
   apiClient.post(`/api/submissions/${id}/next-cycle`, {
     preserveApprovedVersion: true,
