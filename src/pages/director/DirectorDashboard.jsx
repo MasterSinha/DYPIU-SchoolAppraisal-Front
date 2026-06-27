@@ -11,6 +11,7 @@ const directorAuditSchema = {
 
 export default function DirectorDashboard() {
   const navigate = useNavigate();
+  const academicYear = sessionStorage.getItem("academicYear") || directorAuditSchema.academicYear;
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [activeSectionId, setActiveSectionId] = useState(directorAuditSchema.sections[0].id);
   const [reportMode, setReportMode] = useState(false);
@@ -35,6 +36,7 @@ export default function DirectorDashboard() {
         subtitle="D. Y. Patil International University"
         roleTitle="Academic Audit"
         roleText="Director of Schools"
+        academicYear={academicYear}
         items={directorAuditSchema.sections}
         activeId={activeSectionId}
         onChange={(sectionId) => {
@@ -49,6 +51,7 @@ export default function DirectorDashboard() {
       <main className="academic-audit-main" style={styles.page}>
         <AuditForm
           schema={directorAuditSchema}
+          academicYear={academicYear}
           activeSectionId={activeSectionId}
           reportMode={reportMode}
           onReportModeChange={setReportMode}

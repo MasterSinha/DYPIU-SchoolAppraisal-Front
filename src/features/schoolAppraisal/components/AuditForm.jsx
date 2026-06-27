@@ -1,4 +1,3 @@
-//contains all the schema for academic audit 2025-26 form
 import { useEffect, useMemo, useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
 import { buildSubmissionPayload, deleteAttachment, fetchMyDraft, normalizeDraft, saveDraft, signOffProfileFromSession, submitDraft, uploadAttachments, withSubmitterSignOff } from "../../../api/submissions";
@@ -62,7 +61,7 @@ function buildInitialTables(schema) {
   }, {});
 }
 
-export default function AuditForm({ schema, activeSectionId, reportMode, onReportModeChange, onSectionChange }) {
+export default function AuditForm({ schema, academicYear = schema.academicYear, activeSectionId, reportMode, onReportModeChange, onSectionChange }) {
   const auditType = schema.id.includes("administrative") ? "administrative" : "academic";
   const initialValues = useMemo(() => buildInitialValues(schema), [schema]);
   const initialTables = useMemo(() => buildInitialTables(schema), [schema]);
@@ -239,7 +238,7 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
             Print Report
           </button>
         </div>
-        <AuditReportPanel schema={schema} values={values} tables={tables} />
+        <AuditReportPanel schema={{ ...schema, academicYear }} values={values} tables={tables} />
       </div>
     );
   }
@@ -254,7 +253,7 @@ export default function AuditForm({ schema, activeSectionId, reportMode, onRepor
             <h1 style={styles.title}>{schema.title}</h1>
             <p style={styles.meta}>{schema.header.address}</p>
             <div style={styles.headerMetaRow}>
-              <span style={styles.year}>Academic Year {schema.academicYear}</span>
+              <span style={styles.year}>Academic Year {academicYear}</span>
               <span style={styles.draftPill}>Draft in progress</span>
             </div>
           </div>

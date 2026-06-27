@@ -117,6 +117,7 @@ export const normalizeUserProfile = (payload = {}) => {
     category,
     auditorType,
     auditorRole,
+    academicYear: user.academicYear || user.currentAcademicYear || payload.academicYear || payload.currentAcademicYear || "",
     role: accountType === "auditor" ? auditorRole : rawRole,
   };
 };
@@ -262,6 +263,8 @@ export const createNextAuditCycle = (id, payload = {}) =>
     preserveApprovedVersion: true,
     ...payload,
   });
+export const startNextAcademicYear = (payload) =>
+  apiClient.post("/api/audit-cycles/start-next", payload);
 
 export const parseSubmissionFormData = (submission = {}) => ({
   values: safeJsonParse(submission.valuesData ?? submission.values ?? submission.fieldsData ?? submission.fields, {}),

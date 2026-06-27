@@ -29,6 +29,20 @@ export default function AppSidebar({
   onLogout,
 }) {
   const activeItem = items.find((item) => item.id === activeId);
+  const actionGroups = standaloneItems.reduce((groups, item) => {
+    const groupId = item.group || "review-actions";
+    const existingGroup = groups.find((group) => group.id === groupId);
+    if (existingGroup) {
+      existingGroup.items.push(item);
+    } else {
+      groups.push({
+        id: groupId,
+        label: item.groupLabel || "Review Actions",
+        items: [item],
+      });
+    }
+    return groups;
+  }, []);
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -133,27 +147,34 @@ export default function AppSidebar({
         </div>
         <span className="app-sidebar__nav-hint">Jump to any section at any time</span>
 
-        {standaloneItems.length > 0 && (
-          <div className="app-sidebar__nav-list" aria-label="Review actions">
-            {standaloneItems.map((item) => {
-              const selected = item.id === activeId;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`app-sidebar__nav-item${selected ? " is-active" : ""}`}
-                  onClick={() => selectSection(item.id)}
-                  aria-current={selected ? "page" : undefined}
-                >
-                  <span className="app-sidebar__nav-icon"><ClipboardIcon /></span>
-                  <span className="app-sidebar__nav-text">
-                    <small>Final verification</small>
-                    <strong>{item.title}</strong>
-                  </span>
-                  {selected && <span className="app-sidebar__active-dot" />}
-                </button>
-              );
-            })}
+        {actionGroups.length > 0 && (
+          <div className="app-sidebar__action-groups">
+            {actionGroups.map((group) => (
+              <section className={`app-sidebar__action-group app-sidebar__action-group--${group.id}`} key={group.id}>
+                <span className="app-sidebar__action-heading">{group.label}</span>
+                <div className="app-sidebar__nav-list" aria-label={group.label}>
+                  {group.items.map((item) => {
+                    const selected = item.id === activeId;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`app-sidebar__nav-item${selected ? " is-active" : ""}`}
+                        onClick={() => selectSection(item.id)}
+                        aria-current={selected ? "page" : undefined}
+                      >
+                        <span className="app-sidebar__nav-icon"><ClipboardIcon /></span>
+                        <span className="app-sidebar__nav-text">
+                          <small>{item.caption || group.label}</small>
+                          <strong>{item.title}</strong>
+                        </span>
+                        {selected && <span className="app-sidebar__active-dot" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>
         )}
       </nav>

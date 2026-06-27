@@ -63,6 +63,7 @@ export default function Login() {
       sessionStorage.setItem("category", profile.category);
       sessionStorage.setItem("auditorType", profile.auditorType);
       sessionStorage.setItem("auditorRole", profile.auditorRole);
+      if (profile.academicYear) sessionStorage.setItem("academicYear", profile.academicYear);
       sessionStorage.setItem("role", profile.role);
       navigate(dashboardForRole(profile.role), { replace: true });
     } catch (loginError) {

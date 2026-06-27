@@ -12,6 +12,7 @@ import {
   getSubmissionSignOff,
   parseSubmissionFormData,
   reviewSubmission,
+  startNextAcademicYear,
   updateSubmissionById,
   withApproverSignOff,
 } from "../../../api/submissions";
@@ -34,10 +35,29 @@ const REVIEW_NAV_ITEMS = [
   { id: "academic", title: "Academic Audit" },
   { id: "administrative", title: "Administrative Audit" },
 ];
-const AUDITOR_FINAL_REVIEW_NAV_ITEM = { id: "auditor-final-review", title: "Auditor Final Review" };
-const PREVIOUS_REPORTS_NAV_ITEM = { id: "previous-reports", title: "Previous Reports" };
+const AUDITOR_FINAL_REVIEW_NAV_ITEM = {
+  id: "auditor-final-review",
+  title: "Auditor Final Review",
+  caption: "Completed auditor forms",
+  group: "final-verification",
+  groupLabel: "Final Verification",
+};
+const PREVIOUS_REPORTS_NAV_ITEM = {
+  id: "previous-reports",
+  title: "Previous Reports",
+  caption: "Approved report history",
+  group: "final-verification",
+  groupLabel: "Final Verification",
+};
 const USER_MANAGEMENT_NAV_ITEM = { id: "user-management", title: "User Management" };
 const REPORT_ARCHIVE_FIELD = "__reportArchive";
+const START_NEXT_YEAR_NAV_ITEM = {
+  id: "start-next-academic-year",
+  title: "Start Next Academic Year",
+  caption: "Create blank yearly forms",
+  group: "audit-cycle",
+  groupLabel: "Audit Cycle",
+};
 
 const REVIEW_ROLE_CONFIG = {
   "vice-chancellor": {
@@ -71,7 +91,6 @@ const statusLabels = {
   "under-review": "Under Review",
   "auditor-completed": "Auditor Completed",
   approved: "Approved",
-  "sent-back": "Sent Back",
 };
 
 const statusStyles = {
@@ -79,7 +98,6 @@ const statusStyles = {
   "under-review": { color: "#92400e", background: "#fef3c7", border: "#fde68a" },
   "auditor-completed": { color: "#0f766e", background: "#ccfbf1", border: "#99f6e4" },
   approved: { color: "#166534", background: "#dcfce7", border: "#bbf7d0" },
-  "sent-back": { color: "#991b1b", background: "#fee2e2", border: "#fecaca" },
 };
 
 const auditLabels = {
@@ -95,6 +113,31 @@ const groupTabs = [
 
 const initialsFor = (name = "") => name.split(" ").filter(Boolean).map((word) => word[0]).join("").slice(0, 2).toUpperCase();
 const titleCase = (value = "") => String(value).replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const normalizeAcademicYear = (value = "2025-2026") => {
+  const match = String(value).match(/(\d{4})\D+(\d{2,4})/);
+  if (!match) return "2025-2026";
+  const startYear = Number(match[1]);
+  const endYear = match[2].length === 2
+    ? Number(`${String(startYear).slice(0, 2)}${match[2]}`)
+    : Number(match[2]);
+  return `${startYear}-${endYear}`;
+};
+const nextAcademicYearFor = (value) => {
+  const [startYear, endYear] = normalizeAcademicYear(value).split("-").map(Number);
+  return `${startYear + 1}-${endYear + 1}`;
+};
+const academicYearPeriod = (value) => {
+  const [startYear, endYear] = normalizeAcademicYear(value).split("-");
+  return `July, ${startYear} - June, ${endYear}`;
+};
+const hasAuditorAssignment = (submission = {}) => Boolean(
+  submission.forwardedAt ||
+  submission.forwardedToAuditorId ||
+  submission.forwardedToAuditorName ||
+  submission.forwardedToAuditorIds?.length ||
+  submission.forwardedToAuditorEmails?.length ||
+  ["under-review", "auditor-completed", "approved"].includes(submission.status)
+);
 const safeArchiveName = (value = "") => String(value).trim().replace(/[<>:"/\\|?*]+/g, "_").replace(/\s+/g, "_");
 const archiveFileName = (submission, headers = {}) => {
   const disposition = headers["content-disposition"] || headers.get?.("content-disposition") || "";
@@ -354,7 +397,9 @@ const normalizeSubmission = (submission = {}) => {
     ),
     auditCycle: submission.auditCycle || submission.cycleLabel || submission.auditPeriod || archiveMetadata.auditCycle || "2025-26",
     version: Number(submission.version || submission.reportVersion || submission.cycleVersion || archiveMetadata.version || 1),
+    rootSubmissionId: submission.rootSubmissionId || submission.auditRootId || submission.id || submission.submissionId,
     parentSubmissionId: submission.parentSubmissionId || submission.previousSubmissionId || null,
+    previousApprovedSubmissionId: submission.previousApprovedSubmissionId || submission.sourceApprovedSubmissionId || null,
     hasNextCycle: Boolean(submission.hasNextCycle || submission.nextCycleStarted || submission.nextVersionId),
     sections: submission.sections || sectionsForAudit(auditType),
     attachments: formData.attachments.length ? formData.attachments : submission.attachments || [],
@@ -399,6 +444,11 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   const [approvalCategory, setApprovalCategory] = useState("");
   const [startingNextCycleId, setStartingNextCycleId] = useState("");
   const [downloadingAttachmentsId, setDownloadingAttachmentsId] = useState("");
+  const [academicYear, setAcademicYear] = useState(
+    normalizeAcademicYear(sessionStorage.getItem("academicYear") || "2025-2026"),
+  );
+  const [showNextYearModal, setShowNextYearModal] = useState(false);
+  const [startingAcademicYear, setStartingAcademicYear] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const canManageUsers = role === "iqac";
   const roleConfig = isAuditor ? REVIEW_ROLE_CONFIG.auditor : REVIEW_ROLE_CONFIG[role] || REVIEW_ROLE_CONFIG.iqac;
@@ -430,7 +480,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
   }, [canManageUsers, isAuditor, profile.category]);
   const standaloneNavigationItems = useMemo(
     () => !isAuditor && ["iqac", "vice-chancellor"].includes(role)
-      ? [AUDITOR_FINAL_REVIEW_NAV_ITEM, PREVIOUS_REPORTS_NAV_ITEM]
+      ? [AUDITOR_FINAL_REVIEW_NAV_ITEM, PREVIOUS_REPORTS_NAV_ITEM, START_NEXT_YEAR_NAV_ITEM]
       : [],
     [isAuditor, role],
   );
@@ -440,7 +490,19 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     [allSubmissions],
   );
   const previousReports = useMemo(
-    () => allSubmissions.filter(isApprovedReport),
+    () => allSubmissions.filter(isApprovedReport).map((report) => {
+      const reportId = String(report.id);
+      const hasSuccessor = allSubmissions.some((submission) =>
+        String(submission.parentSubmissionId || "") === reportId ||
+        String(submission.previousApprovedSubmissionId || "") === reportId ||
+        (
+          submission.id !== report.id &&
+          String(submission.rootSubmissionId || "") === String(report.rootSubmissionId || "") &&
+          Number(submission.version || 1) > Number(report.version || 1)
+        )
+      );
+      return { ...report, hasNextCycle: report.hasNextCycle || hasSuccessor };
+    }),
     [allSubmissions],
   );
   const intakeSubmissions = useMemo(() => ({
@@ -648,6 +710,34 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     }
   };
 
+  const handleStartNextAcademicYear = async () => {
+    const nextAcademicYear = nextAcademicYearFor(academicYear);
+    setStartingAcademicYear(true);
+    setError("");
+
+    try {
+      const { data } = await startNextAcademicYear({
+        currentAcademicYear: academicYear,
+        nextAcademicYear,
+        preserveApprovedHistory: true,
+        resetActiveForms: true,
+      });
+      const confirmedYear = normalizeAcademicYear(
+        data?.data?.academicYear || data?.academicYear || nextAcademicYear,
+      );
+      sessionStorage.setItem("academicYear", confirmedYear);
+      setAcademicYear(confirmedYear);
+      setShowNextYearModal(false);
+      setSelectedSubmission(null);
+      setActiveView("overview");
+      setRefreshKey((current) => current + 1);
+    } catch (cycleError) {
+      setError(getApiErrorMessage(cycleError, "Could not start the next academic year."));
+    } finally {
+      setStartingAcademicYear(false);
+    }
+  };
+
   const handleLogout = () => {
     sessionStorage.clear();
     navigate("/login", { replace: true });
@@ -773,11 +863,15 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
           badge={roleConfig.badge}
           roleTitle={roleConfig.roleTitle}
           roleText={roleConfig.roleText}
-          academicYear="2025-26"
+          academicYear={academicYear}
           items={navigationItems}
           standaloneItems={standaloneNavigationItems}
           activeId={visibleActiveView}
           onChange={(viewId) => {
+            if (viewId === START_NEXT_YEAR_NAV_ITEM.id) {
+              setShowNextYearModal(true);
+              return;
+            }
             if (viewId === "user-management" && !canManageUsers) return;
             setSelectedSubmission(null);
             setActiveView(viewId);
@@ -796,7 +890,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
                 <div>
                   <p style={styles.kicker}>D Y Patil International University Akurdi Pune</p>
                   <h1 style={styles.title}>{roleConfig.title}</h1>
-                  <p style={styles.meta}>School Appraisal Review - Academic Year July, 2025 - June, 2026</p>
+                  <p style={styles.meta}>School Appraisal Review - Academic Year {academicYearPeriod(academicYear)}</p>
                 </div>
               </div>
             </header>
@@ -907,6 +1001,15 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
             }}
           />
         )}
+        {showNextYearModal && (
+          <NextAcademicYearModal
+            currentAcademicYear={academicYear}
+            nextAcademicYear={nextAcademicYearFor(academicYear)}
+            loading={startingAcademicYear}
+            onConfirm={handleStartNextAcademicYear}
+            onCancel={() => setShowNextYearModal(false)}
+          />
+        )}
         {showLogoutModal && <LogoutModal onCancel={() => setShowLogoutModal(false)} onConfirm={handleLogout} />}
       </div>
     </>
@@ -921,7 +1024,7 @@ function buildMetrics(submissions) {
       if (metrics[submission.auditType] != null) metrics[submission.auditType] += 1;
       return metrics;
     },
-    { total: 0, submitted: 0, "under-review": 0, "auditor-completed": 0, approved: 0, "sent-back": 0, academic: 0, administrative: 0 }
+    { total: 0, submitted: 0, "under-review": 0, "auditor-completed": 0, approved: 0, academic: 0, administrative: 0 }
   );
 }
 
@@ -954,8 +1057,8 @@ function OverviewPanel({ metrics, submissions, loading, onOpen }) {
       <div style={styles.metricGrid}>
         <MetricCard label="Total submissions" value={metrics.total} hint="Across both audit types" tone="blue" />
         <MetricCard label="Pending review" value={metrics.submitted + metrics["under-review"]} hint="Requires reviewer action" tone="amber" />
+        <MetricCard label="Auditor completed" value={metrics["auditor-completed"]} hint="Awaiting final approval" tone="teal" />
         <MetricCard label="Approved" value={metrics.approved} hint={`${approvalRate}% completion rate`} tone="green" />
-        <MetricCard label="Sent back" value={metrics["sent-back"]} hint="Awaiting school updates" tone="red" />
       </div>
 
       {loading && <SkeletonList rows={3} />}
@@ -1026,8 +1129,8 @@ function AdvancedOverviewPanel({ metrics, submissions, loading }) {
       <div style={styles.metricGrid}>
         <MetricCard label="Submitted" value={metrics.submitted} hint="Waiting to enter review" tone="blue" />
         <MetricCard label="Under review" value={metrics["under-review"]} hint="Currently being assessed" tone="amber" />
+        <MetricCard label="Auditor completed" value={metrics["auditor-completed"]} hint="Ready for final verification" tone="teal" />
         <MetricCard label="Approved" value={metrics.approved} hint={`${approvalRate}% overall approval`} tone="green" />
-        <MetricCard label="Sent back" value={metrics["sent-back"]} hint="Requires resubmission" tone="red" />
       </div>
 
       <SchoolProgressPanel schools={schoolProgress} loading={loading} />
@@ -1332,9 +1435,9 @@ function SubmissionCard({
       )}
 
       <div style={styles.cardActions}>
-        {onForward && !isAuditorCompleted(submission) && (
+        {onForward && !isAuditorCompleted(submission) && !hasAuditorAssignment(submission) && (
           <button type="button" className="btn btn-secondary" onClick={onForward}>
-            {submission.forwardedToAuditorName ? "Change Auditor" : "Forward to Auditor"}
+            Forward to Auditor
           </button>
         )}
         {onStartNextCycle && (
@@ -1834,8 +1937,8 @@ function MetricCard({ label, value, hint, tone }) {
   const tones = {
     blue: { color: "#1d4ed8", background: "#dbeafe" },
     amber: { color: "#b45309", background: "#fef3c7" },
+    teal: { color: "#0f766e", background: "#ccfbf1" },
     green: { color: "#15803d", background: "#dcfce7" },
-    red: { color: "#b91c1c", background: "#fee2e2" },
   };
   const activeTone = tones[tone] || tones.blue;
   return (
@@ -1874,6 +1977,50 @@ function StatusBadge({ status }) {
     <span style={{ ...styles.statusBadge, color: tone.color, background: tone.background, borderColor: tone.border }}>
       {statusLabels[status] || status}
     </span>
+  );
+}
+
+function NextAcademicYearModal({ currentAcademicYear, nextAcademicYear, loading, onConfirm, onCancel }) {
+  return (
+    <div style={styles.modalBackdrop} onClick={loading ? undefined : onCancel}>
+      <div
+        style={styles.nextYearModal}
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="next-academic-year-title"
+      >
+        <div style={styles.nextYearHeader}>
+          <span style={styles.forwardHeaderIcon}>AY</span>
+          <div>
+            <p style={styles.kicker}>Academic year transition</p>
+            <h3 id="next-academic-year-title" style={styles.forwardModalTitle}>Start {nextAcademicYear}</h3>
+            <p style={styles.modalMeta}>Current academic year: {currentAcademicYear}</p>
+          </div>
+        </div>
+
+        <div style={styles.nextYearWarning}>
+          Active forms will restart from the beginning for Directors and Administrative authorities.
+          Approved reports and version history will remain unchanged.
+        </div>
+
+        <div style={styles.nextYearChecklist}>
+          <span>Blank active Academic and Administrative forms</span>
+          <span>Clear active auditor assignments and current remarks</span>
+          <span>Preserve Previous Reports and approved audit history</span>
+        </div>
+
+        <div style={styles.forwardFooter}>
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={loading}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={loading} aria-busy={loading}>
+            {loading && <InlineSpinner label="Starting next academic year" />}
+            {loading ? "Starting..." : `Confirm ${nextAcademicYear}`}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1939,12 +2086,28 @@ function ApprovalCategoryModal({ submission, selectedCategory, onCategoryChange,
 }
 
 function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTypeChange, forwardingId, onForward, onCancel }) {
+  const [selectedAuditorIds, setSelectedAuditorIds] = useState([]);
   const matchingAuditors = selectedType
     ? auditors.filter((auditor) => auditor.auditorType === selectedType && matchesSubmissionAssignment(auditor, submission))
     : [];
+  const selectedAuditors = matchingAuditors.filter((auditor) => selectedAuditorIds.includes(String(auditor.id)));
+  const allSelected = matchingAuditors.length > 0 && selectedAuditors.length === matchingAuditors.length;
   const assignmentLabel = submission.auditType === "academic"
     ? submission.school
     : (submission.submittedByDesignation || submission.school || "Administrative submission");
+
+  const toggleAuditor = (auditorId) => {
+    const normalizedId = String(auditorId);
+    setSelectedAuditorIds((current) =>
+      current.includes(normalizedId)
+        ? current.filter((id) => id !== normalizedId)
+        : [...current, normalizedId]
+    );
+  };
+  const selectAuditorType = (auditorType) => {
+    setSelectedAuditorIds([]);
+    onTypeChange(auditorType);
+  };
 
   return (
     <div style={styles.modalBackdrop} onClick={onCancel}>
@@ -1985,7 +2148,7 @@ function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTy
                 key={type.value}
                 type="button"
                 style={{ ...styles.forwardTypeButton, ...(selectedType === type.value ? styles.activeForwardTypeButton : {}) }}
-                onClick={() => onTypeChange(type.value)}
+                onClick={() => selectAuditorType(type.value)}
               >
                 <strong>{type.label}</strong>
                 <span>{type.detail}</span>
@@ -2018,30 +2181,74 @@ function ForwardAuditorModal({ submission, auditors, loading, selectedType, onTy
             <>
               <div style={styles.forwardGroupSummary}>
                 <strong>{matchingAuditors.length} {selectedType} auditor{matchingAuditors.length === 1 ? "" : "s"} matched</strong>
-                <span>All listed auditors will receive this {auditLabels[submission.auditType]} for {assignmentLabel}.</span>
+                <span>Select specific auditors or forward the form to everyone in this matching group.</span>
+                <div style={styles.auditorSelectionTools}>
+                  <button
+                    type="button"
+                    style={styles.auditorSelectionButton}
+                    onClick={() => setSelectedAuditorIds(matchingAuditors.map((auditor) => String(auditor.id)))}
+                    disabled={allSelected || Boolean(forwardingId)}
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.auditorSelectionButton}
+                    onClick={() => setSelectedAuditorIds([])}
+                    disabled={!selectedAuditors.length || Boolean(forwardingId)}
+                  >
+                    Clear
+                  </button>
+                  <span>{selectedAuditors.length} selected</span>
+                </div>
               </div>
               <div style={styles.auditorList}>
                 {matchingAuditors.map((auditor) => (
-                  <div key={auditor.id} style={styles.auditorOption}>
+                  <label
+                    key={auditor.id}
+                    style={{
+                      ...styles.auditorOption,
+                      ...(selectedAuditorIds.includes(String(auditor.id)) ? styles.selectedAuditorOption : {}),
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedAuditorIds.includes(String(auditor.id))}
+                      onChange={() => toggleAuditor(auditor.id)}
+                      disabled={Boolean(forwardingId)}
+                      style={styles.auditorCheckbox}
+                    />
                     <span style={styles.auditorAvatar}>{initialsFor(auditor.name)}</span>
                     <span style={styles.auditorOptionBody}>
                       <strong>{auditor.name}</strong>
                       <small>{auditor.email}</small>
                       <small>{submission.auditType === "academic" ? auditor.school : auditor.assignment}</small>
                     </span>
-                    <span style={styles.auditorAssignText}>Included</span>
-                  </div>
+                    <span style={styles.auditorAssignText}>
+                      {selectedAuditorIds.includes(String(auditor.id)) ? "Selected" : "Select"}
+                    </span>
+                  </label>
                 ))}
               </div>
-              <button
-                type="button"
-                className="btn btn-primary"
-                style={styles.forwardPrimaryButton}
-                onClick={() => onForward(selectedType, matchingAuditors)}
-                disabled={Boolean(forwardingId)}
-              >
-                {forwardingId === selectedType ? "Forwarding..." : `Forward to all ${matchingAuditors.length}`}
-              </button>
+              <div style={styles.forwardSelectionActions}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => onForward(selectedType, selectedAuditors)}
+                  disabled={!selectedAuditors.length || Boolean(forwardingId)}
+                >
+                  {forwardingId === selectedType ? "Forwarding..." : `Forward Selected (${selectedAuditors.length})`}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={styles.forwardPrimaryButton}
+                  onClick={() => onForward(selectedType, matchingAuditors)}
+                  disabled={Boolean(forwardingId)}
+                >
+                  {forwardingId === selectedType ? "Forwarding..." : `Forward to All (${matchingAuditors.length})`}
+                </button>
+              </div>
             </>
           ) : (
             <div style={styles.forwardErrorState}>
@@ -2135,7 +2342,7 @@ const styles = {
     flex: 1,
     background: "#f5f7fb",
     padding: "28px 30px 40px",
-    overflowX: "auto",
+    overflowX: "hidden",
   },
   header: {
     display: "flex",
@@ -2808,6 +3015,42 @@ const styles = {
     gap: 18,
     boxShadow: "0 24px 70px rgba(0,0,0,0.28)",
   },
+  nextYearModal: {
+    width: "min(560px, 94vw)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 18,
+    overflow: "hidden",
+    border: "1px solid #dbe4f0",
+    borderRadius: 8,
+    background: "#fff",
+    boxShadow: "0 24px 70px rgba(15, 23, 42, .3)",
+  },
+  nextYearHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 14,
+    padding: "22px 24px 0",
+  },
+  nextYearWarning: {
+    margin: "0 24px",
+    border: "1px solid #fde68a",
+    borderRadius: 8,
+    color: "#92400e",
+    background: "#fffbeb",
+    padding: "12px 14px",
+    fontSize: 13,
+    fontWeight: 650,
+    lineHeight: 1.55,
+  },
+  nextYearChecklist: {
+    display: "grid",
+    gap: 8,
+    margin: "0 24px",
+    color: "#475569",
+    fontSize: 12,
+    lineHeight: 1.5,
+  },
   modalHeader: {
     display: "flex",
     justifyContent: "space-between",
@@ -2918,6 +3161,23 @@ const styles = {
     background: "#eff6ff",
     fontSize: 12,
   },
+  auditorSelectionTools: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 7,
+  },
+  auditorSelectionButton: {
+    border: "1px solid #bfdbfe",
+    borderRadius: 6,
+    color: "#1d4ed8",
+    background: "#fff",
+    padding: "5px 8px",
+    cursor: "pointer",
+    fontSize: 11,
+    fontWeight: 750,
+  },
   auditorList: {
     display: "grid",
     gap: 10,
@@ -2932,10 +3192,22 @@ const styles = {
     borderRadius: 14,
     color: "#0f172a",
     background: "#fff",
-    cursor: "default",
+    cursor: "pointer",
     fontFamily: "inherit",
     textAlign: "left",
     boxShadow: "0 6px 16px rgba(15, 23, 42, .035)",
+  },
+  selectedAuditorOption: {
+    borderColor: "#2563eb",
+    background: "#eff6ff",
+    boxShadow: "0 0 0 2px rgba(37, 99, 235, .1)",
+  },
+  auditorCheckbox: {
+    width: 17,
+    height: 17,
+    flex: "0 0 17px",
+    accentColor: "#2563eb",
+    cursor: "pointer",
   },
   auditorAvatar: {
     width: 38,
@@ -2963,6 +3235,11 @@ const styles = {
     background: "#dcfce7",
     fontSize: 12,
     fontWeight: 850,
+  },
+  forwardSelectionActions: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 10,
   },
   forwardEmptyState: {
     minHeight: 118,
