@@ -15,6 +15,20 @@ export const normalizeRole = (role = "") => String(role).trim().toLowerCase().re
 
 export const SIGN_OFF_FIELD = "__auditSignOff";
 
+const normalizeListValue = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (!value) return [];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean);
+    } catch {
+      return value.split(",").map((item) => item.trim()).filter(Boolean);
+    }
+  }
+  return [];
+};
+
 export const signOffProfileFromSession = (fallbackRole = "") => ({
   name: sessionStorage.getItem("name") || "",
   designation: sessionStorage.getItem("designation") || "",
@@ -113,6 +127,16 @@ export const normalizeUserProfile = (payload = {}) => {
     designation: user.designation || payload.designation || "",
     school: user.school || user.schoolName || payload.school || "",
     post: user.post || payload.post || "",
+    administrativePosts: [
+      user.administrativePosts,
+      user.assignedPosts,
+      user.posts,
+      payload.administrativePosts,
+      payload.assignedPosts,
+      payload.posts,
+      user.post,
+      payload.post,
+    ].map(normalizeListValue).find((posts) => posts.length) || [],
     accountType,
     category,
     auditorType,

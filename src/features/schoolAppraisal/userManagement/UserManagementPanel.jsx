@@ -11,6 +11,7 @@ const emptyForm = {
   auditorType: "",
   school: "",
   post: "",
+  administrativePosts: [],
   name: "",
   email: "",
   password: "",
@@ -23,6 +24,20 @@ const normalizeList = (payload) => {
   if (Array.isArray(data?.content)) return data.content;
   if (Array.isArray(data?.users)) return data.users;
   if (Array.isArray(data?.items)) return data.items;
+  return [];
+};
+
+const normalizePostList = (value) => {
+  if (Array.isArray(value)) return [...new Set(value.filter(Boolean))];
+  if (!value) return [];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return [...new Set(parsed.filter(Boolean))];
+    } catch {
+      return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))];
+    }
+  }
   return [];
 };
 
@@ -48,6 +63,14 @@ const normalizeUser = (user = {}, index = 0) => {
         : "authority"
   );
   const designation = user.designation || user.post || "";
+  const administrativePosts = [
+    user.administrativePosts,
+    user.assignedPosts,
+    user.posts,
+  ].map(normalizePostList).find((posts) => posts.length) || [];
+  const resolvedAdministrativePosts = accountType === "auditor" && category === "administrative"
+    ? (administrativePosts.length ? administrativePosts : normalizePostList(user.post))
+    : [];
 
   return {
     ...user,
@@ -57,12 +80,15 @@ const normalizeUser = (user = {}, index = 0) => {
     accountType,
     auditorType,
     category,
+    administrativePosts: resolvedAdministrativePosts,
     role: accountType === "auditor"
       ? (user.auditorRole || `${category}-${auditorType || "internal"}-auditor`)
       : (role || (category === "academic" ? "director" : "administrative")),
     assignment: category === "academic"
       ? (user.school || user.schoolName || "-")
-      : (designation || "-"),
+      : resolvedAdministrativePosts.length
+        ? resolvedAdministrativePosts.map(postLabelFor).join(", ")
+        : (designation || "-"),
     status: String(user.status || (user.active === false ? "inactive" : "active")).toLowerCase(),
   };
 };
@@ -87,7 +113,12 @@ function validate(form) {
   if (!form.category) errors.category = "Select Academic or Administrative.";
   if (form.accountType === "auditor" && !form.auditorType) errors.auditorType = "Select Internal or External auditor.";
   if (form.category === "academic" && !canonicalSchoolCode(form.school)) errors.school = "Select a valid school.";
-  if (form.category === "administrative" && !form.post) errors.post = "Select an administrative post.";
+  if (
+    form.category === "administrative" &&
+    form.accountType === "auditor" &&
+    !form.administrativePosts.length
+  ) errors.administrativePosts = "Select at least one administrative post.";
+  if (form.category === "administrative" && form.accountType !== "auditor" && !form.post) errors.post = "Select an administrative post.";
   if (!form.name.trim()) errors.name = "Enter the user's name.";
   if (!form.email.trim()) errors.email = "Enter an email address.";
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) errors.email = "Enter a valid email address.";
@@ -103,7 +134,12 @@ function validateEdit(form) {
   if (!form.category) errors.category = "Select Academic or Administrative.";
   if (form.accountType === "auditor" && !form.auditorType) errors.auditorType = "Select Internal or External auditor.";
   if (form.category === "academic" && !canonicalSchoolCode(form.school)) errors.school = "Select a valid school.";
-  if (form.category === "administrative" && !form.post) errors.post = "Select an administrative post.";
+  if (
+    form.category === "administrative" &&
+    form.accountType === "auditor" &&
+    !form.administrativePosts.length
+  ) errors.administrativePosts = "Select at least one administrative post.";
+  if (form.category === "administrative" && form.accountType !== "auditor" && !form.post) errors.post = "Select an administrative post.";
   if (!form.name.trim()) errors.name = "Enter the user's name.";
   if (!form.email.trim()) errors.email = "Enter an email address.";
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) errors.email = "Enter a valid email address.";
@@ -117,6 +153,12 @@ const editFormFromUser = (user = {}) => {
   const postValue = ADMINISTRATIVE_POSTS.find((post) =>
     post.value === user.post || post.label === user.post || post.label === user.assignment || post.value === user.designation
   )?.value || "";
+  const administrativePosts = [
+    user.administrativePosts,
+    user.assignedPosts,
+    user.posts,
+    user.accountType === "auditor" && category === "administrative" ? postValue : [],
+  ].map(normalizePostList).find((posts) => posts.length) || [];
 
   return {
     accountType: user.accountType === "auditor" ? "auditor" : "user",
@@ -124,6 +166,7 @@ const editFormFromUser = (user = {}) => {
     auditorType: user.accountType === "auditor" ? (user.auditorType || "internal") : "",
     school: category === "academic" ? canonicalSchoolCode(user.school || user.schoolName || user.assignment) : "",
     post: category === "administrative" ? postValue : "",
+    administrativePosts: category === "administrative" && user.accountType === "auditor" ? administrativePosts : [],
     name: user.name === "-" ? "" : user.name || "",
     email: user.email === "-" ? "" : user.email || "",
     password: "",
@@ -186,15 +229,26 @@ export default function UserManagementPanel() {
     setForm((current) => ({
       ...current,
       [field]: value,
-      ...(field === "accountType" ? { category: "", auditorType: "", school: "", post: "" } : {}),
-      ...(field === "category" ? { school: "", post: "" } : {}),
+      ...(field === "accountType" ? { category: "", auditorType: "", school: "", post: "", administrativePosts: [] } : {}),
+      ...(field === "category" ? { school: "", post: "", administrativePosts: [] } : {}),
     }));
     setErrors((current) => ({
       ...current,
       [field]: "",
-      ...(field === "accountType" ? { category: "", auditorType: "", school: "", post: "" } : {}),
-      ...(field === "category" ? { school: "", post: "" } : {}),
+      ...(field === "accountType" ? { category: "", auditorType: "", school: "", post: "", administrativePosts: "" } : {}),
+      ...(field === "category" ? { school: "", post: "", administrativePosts: "" } : {}),
     }));
+    setStatus("");
+  };
+
+  const toggleAdministrativePost = (post) => {
+    setForm((current) => ({
+      ...current,
+      administrativePosts: current.administrativePosts.includes(post)
+        ? current.administrativePosts.filter((item) => item !== post)
+        : [...current.administrativePosts, post],
+    }));
+    setErrors((current) => ({ ...current, administrativePosts: "" }));
     setStatus("");
   };
 
@@ -229,7 +283,12 @@ export default function UserManagementPanel() {
       role: roleForForm(form),
       school: isAcademic ? canonicalSchoolCode(form.school) : "Administrative Office",
       designation: designationForForm(form),
-      post: isAcademic ? null : form.post,
+      post: isAcademic
+        ? null
+        : form.accountType === "auditor"
+          ? form.administrativePosts[0] || null
+          : form.post,
+      administrativePosts: !isAcademic && form.accountType === "auditor" ? form.administrativePosts : [],
       name: form.name.trim(),
       email: form.email.trim().toLowerCase(),
       password: form.password,
@@ -270,16 +329,27 @@ export default function UserManagementPanel() {
     setEditForm((current) => ({
       ...current,
       [field]: value,
-      ...(field === "accountType" ? { category: "", auditorType: "", school: "", post: "" } : {}),
-      ...(field === "category" ? { school: "", post: "" } : {}),
+      ...(field === "accountType" ? { category: "", auditorType: "", school: "", post: "", administrativePosts: [] } : {}),
+      ...(field === "category" ? { school: "", post: "", administrativePosts: [] } : {}),
       ...(field === "password" && !value ? { confirmPassword: "" } : {}),
     }));
     setEditErrors((current) => ({
       ...current,
       [field]: "",
-      ...(field === "accountType" ? { category: "", auditorType: "", school: "", post: "" } : {}),
-      ...(field === "category" ? { school: "", post: "" } : {}),
+      ...(field === "accountType" ? { category: "", auditorType: "", school: "", post: "", administrativePosts: "" } : {}),
+      ...(field === "category" ? { school: "", post: "", administrativePosts: "" } : {}),
     }));
+    setStatus("");
+  };
+
+  const toggleEditAdministrativePost = (post) => {
+    setEditForm((current) => ({
+      ...current,
+      administrativePosts: current.administrativePosts.includes(post)
+        ? current.administrativePosts.filter((item) => item !== post)
+        : [...current.administrativePosts, post],
+    }));
+    setEditErrors((current) => ({ ...current, administrativePosts: "" }));
     setStatus("");
   };
 
@@ -320,7 +390,12 @@ export default function UserManagementPanel() {
       role: roleForForm(editForm),
       school: isAcademic ? canonicalSchoolCode(editForm.school) : "Administrative Office",
       designation: designationForForm(editForm),
-      post: isAcademic ? null : editForm.post,
+      post: isAcademic
+        ? null
+        : editForm.accountType === "auditor"
+          ? editForm.administrativePosts[0] || null
+          : editForm.post,
+      administrativePosts: !isAcademic && editForm.accountType === "auditor" ? editForm.administrativePosts : [],
       name: editForm.name.trim(),
       email: editForm.email.trim().toLowerCase(),
       ...(editForm.password ? { password: editForm.password } : {}),
@@ -424,11 +499,21 @@ export default function UserManagementPanel() {
               )}
 
               {form.category === "administrative" && (
-                <Field label="Administrative Post" error={errors.post}>
-                  <select className="audit-control" style={styles.control} value={form.post} onChange={(event) => updateField("post", event.target.value)}>
-                    <option value="">Select post</option>
-                    {ADMINISTRATIVE_POSTS.map((post) => <option key={post.value} value={post.value}>{post.label}</option>)}
-                  </select>
+                <Field
+                  label={form.accountType === "auditor" ? "Administrative Posts" : "Administrative Post"}
+                  error={form.accountType === "auditor" ? errors.administrativePosts : errors.post}
+                >
+                  {form.accountType === "auditor" ? (
+                    <AdministrativePostMultiSelect
+                      selected={form.administrativePosts}
+                      onToggle={toggleAdministrativePost}
+                    />
+                  ) : (
+                    <select className="audit-control" style={styles.control} value={form.post} onChange={(event) => updateField("post", event.target.value)}>
+                      <option value="">Select post</option>
+                      {ADMINISTRATIVE_POSTS.map((post) => <option key={post.value} value={post.value}>{post.label}</option>)}
+                    </select>
+                  )}
                 </Field>
               )}
             </div>
@@ -655,11 +740,21 @@ export default function UserManagementPanel() {
                 )}
 
                 {editForm.category === "administrative" && (
-                <Field label="Administrative Post" error={editErrors.post}>
-                  <select className="audit-control" style={styles.control} value={editForm.post} onChange={(event) => updateEditField("post", event.target.value)}>
-                    <option value="">Select post</option>
-                    {ADMINISTRATIVE_POSTS.map((post) => <option key={post.value} value={post.value}>{post.label}</option>)}
-                  </select>
+                <Field
+                  label={editForm.accountType === "auditor" ? "Administrative Posts" : "Administrative Post"}
+                  error={editForm.accountType === "auditor" ? editErrors.administrativePosts : editErrors.post}
+                >
+                  {editForm.accountType === "auditor" ? (
+                    <AdministrativePostMultiSelect
+                      selected={editForm.administrativePosts}
+                      onToggle={toggleEditAdministrativePost}
+                    />
+                  ) : (
+                    <select className="audit-control" style={styles.control} value={editForm.post} onChange={(event) => updateEditField("post", event.target.value)}>
+                      <option value="">Select post</option>
+                      {ADMINISTRATIVE_POSTS.map((post) => <option key={post.value} value={post.value}>{post.label}</option>)}
+                    </select>
+                  )}
                 </Field>
                 )}
               </div>
@@ -786,13 +881,46 @@ function ReportStat({ label, value }) {
   );
 }
 
+function AdministrativePostMultiSelect({ selected, onToggle }) {
+  const summary = selected.length
+    ? `${selected.length} post${selected.length === 1 ? "" : "s"} selected`
+    : "Select administrative posts";
+
+  return (
+    <details style={styles.multiSelect}>
+      <summary style={styles.multiSelectSummary}>
+        <span>{summary}</span>
+        <span aria-hidden="true">v</span>
+      </summary>
+      <div style={styles.multiSelectMenu}>
+        {ADMINISTRATIVE_POSTS.map((post) => (
+          <label key={post.value} style={styles.multiSelectOption}>
+            <input
+              type="checkbox"
+              checked={selected.includes(post.value)}
+              onChange={() => onToggle(post.value)}
+              style={styles.multiSelectCheckbox}
+            />
+            <span>{post.label}</span>
+          </label>
+        ))}
+      </div>
+      {!!selected.length && (
+        <div style={styles.selectedPostList}>
+          {selected.map((post) => <span key={post}>{postLabelFor(post)}</span>)}
+        </div>
+      )}
+    </details>
+  );
+}
+
 function Field({ label, error, children }) {
   return (
-    <label style={styles.field}>
+    <div style={styles.field}>
       <span style={styles.label}>{label}</span>
       {children}
       {error && <span style={styles.errorText}>{error}</span>}
-    </label>
+    </div>
   );
 }
 
@@ -815,6 +943,12 @@ const styles = {
   field: { display: "flex", flexDirection: "column", gap: 6 },
   label: { color: "#334155", fontSize: 12, fontWeight: 650 },
   control: { width: "100%", minHeight: 42, border: "1px solid #d7dee9", borderRadius: 8, padding: "9px 11px", color: "#0f172a", background: "#fbfcfe", outline: "none" },
+  multiSelect: { position: "relative", width: "100%" },
+  multiSelectSummary: { minHeight: 42, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 11px", border: "1px solid #d7dee9", borderRadius: 8, color: "#0f172a", background: "#fbfcfe", fontSize: 13, cursor: "pointer", listStyle: "none" },
+  multiSelectMenu: { display: "grid", gap: 4, marginTop: 6, padding: 7, border: "1px solid #d7dee9", borderRadius: 8, background: "#fff", boxShadow: "0 12px 28px rgba(15,23,42,.12)" },
+  multiSelectOption: { minHeight: 38, display: "flex", alignItems: "center", gap: 9, padding: "7px 9px", borderRadius: 6, color: "#334155", background: "#f8fafc", fontSize: 12.5, cursor: "pointer" },
+  multiSelectCheckbox: { width: 16, height: 16, accentColor: "#2563eb", flex: "0 0 auto" },
+  selectedPostList: { display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6, color: "#1d4ed8", fontSize: 10.5, fontWeight: 700 },
   errorText: { color: "#b91c1c", fontSize: 11, fontWeight: 650 },
   formActions: { display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 2 },
   successNotice: { padding: "10px 12px", border: "1px solid #bbf7d0", borderRadius: 10, color: "#166534", background: "#f0fdf4", fontSize: 12, fontWeight: 700 },

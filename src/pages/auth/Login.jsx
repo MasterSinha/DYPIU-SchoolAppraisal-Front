@@ -59,6 +59,7 @@ export default function Login() {
       sessionStorage.setItem("designation", profile.designation);
       sessionStorage.setItem("school", profile.school);
       sessionStorage.setItem("post", profile.post);
+      sessionStorage.setItem("administrativePosts", JSON.stringify(profile.administrativePosts || []));
       sessionStorage.setItem("accountType", profile.accountType);
       sessionStorage.setItem("category", profile.category);
       sessionStorage.setItem("auditorType", profile.auditorType);
