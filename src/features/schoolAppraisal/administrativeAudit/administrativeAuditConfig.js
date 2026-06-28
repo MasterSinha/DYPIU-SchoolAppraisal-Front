@@ -289,7 +289,7 @@ export const administrativeAuditModules = [
   {
     id: "section-e-placement-training",
     number: "E",
-    title: "Student Activities (Extension and Outreach Activities)",
+    title: "Student Progression",
     owner: "Dean Placement",
     note: "(Data to be provided by Dean Industry and Corporate relations, T & P)",
     blocks: [

@@ -26,7 +26,7 @@ import { administrativeAuditMeta, administrativeAuditModules } from "../administ
 import AdministrativeReportPanel from "../administrativeAudit/AdministrativeReportPanel";
 import { academicAudit2025Schema } from "../formSchemas";
 import UserManagementPanel from "../userManagement/UserManagementPanel";
-import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS } from "../userManagement/userManagementConfig";
+import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS, schoolGroupFor } from "../userManagement/userManagementConfig";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 
 const REVIEW_NAV_ITEMS = [
@@ -125,6 +125,10 @@ const normalizeAcademicYear = (value = "2025-2026") => {
 const nextAcademicYearFor = (value) => {
   const [startYear, endYear] = normalizeAcademicYear(value).split("-").map(Number);
   return `${startYear + 1}-${endYear + 1}`;
+};
+const compactAcademicYear = (value) => {
+  const [startYear, endYear] = normalizeAcademicYear(value).split("-");
+  return `${startYear}-${endYear.slice(-2)}`;
 };
 const academicYearPeriod = (value) => {
   const [startYear, endYear] = normalizeAcademicYear(value).split("-");
@@ -238,6 +242,14 @@ const valueList = (value) => {
   return [value].filter(Boolean);
 };
 const normalizeUserRole = (value = "") => String(value).trim().toLowerCase().replaceAll("_", "-");
+const normalizeSchoolGroup = (value = "", school = "", auditType = "academic") => {
+  if (auditType !== "academic") return "all";
+
+  const normalized = normalizeUserRole(value).replace(/\s+/g, "-");
+  if (normalized.includes("non-engineering") || normalized === "nonengineering") return "nonEngineering";
+  if (normalized.includes("engineering")) return "engineering";
+  return schoolGroupFor(school) || "all";
+};
 const normalizeAuditAssignment = (value = "") => String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 const uniqueValues = (values) => [...new Set(values.filter(Boolean))];
 const schoolAliasesFor = (value = "") => {
@@ -264,6 +276,22 @@ const postAliasesFor = (value = "") => {
     option ? normalizeAuditAssignment(option.label) : "",
   ]);
 };
+const administrativePostsFor = (user = {}) => {
+  const rawPosts = [
+    user.administrativePosts,
+    user.assignedPosts,
+    user.posts,
+    user.post,
+  ].map(valueList).find((posts) => posts.length) || [];
+  return uniqueValues(rawPosts.map((value) => {
+    const normalized = normalizeAuditAssignment(value);
+    const option = ADMINISTRATIVE_POSTS.find((post) =>
+      normalizeAuditAssignment(post.value) === normalized ||
+      normalizeAuditAssignment(post.label) === normalized
+    );
+    return option?.value || value;
+  }));
+};
 const assignmentMatches = (left, right, aliasesFor = (value) => uniqueValues([normalizeAuditAssignment(value)])) => {
   const leftAliases = aliasesFor(left);
   const rightAliases = aliasesFor(right);
@@ -283,6 +311,7 @@ const normalizeAuditor = (user = {}, index = 0) => {
     role.includes("administrative") ? "administrative" : role.includes("academic") || role === "director" ? "academic" : ""
   ));
   const designation = user.designation || user.post || "";
+  const administrativePosts = category === "administrative" ? administrativePostsFor(user) : [];
 
   return {
     ...user,
@@ -293,7 +322,12 @@ const normalizeAuditor = (user = {}, index = 0) => {
     auditorType,
     category,
     school: user.school || user.schoolName || "",
-    assignment: category === "academic" ? (user.school || user.schoolName || "") : (designation || ""),
+    administrativePosts,
+    assignment: category === "academic"
+      ? (user.school || user.schoolName || "")
+      : administrativePosts.length
+        ? administrativePosts.map((post) => ADMINISTRATIVE_POSTS.find((option) => option.value === post)?.label || post).join(", ")
+        : (designation || ""),
     designation,
   };
 };
@@ -304,8 +338,11 @@ const matchesSubmissionAssignment = (auditor, submission) => {
   }
 
   const submissionPost = normalizeAuditAssignment(submission.submittedByDesignation || submission.post || submission.department || submission.school);
-  const auditorPost = auditor.post || auditor.designation || auditor.assignment;
-  return Boolean(submissionPost && assignmentMatches(auditorPost, submissionPost, postAliasesFor));
+  const auditorPosts = administrativePostsFor(auditor);
+  return Boolean(
+    submissionPost &&
+    auditorPosts.some((post) => assignmentMatches(post, submissionPost, postAliasesFor))
+  );
 };
 
 const matchesAuditorResponsibility = (submission, profile) => {
@@ -322,9 +359,9 @@ const matchesAuditorResponsibility = (submission, profile) => {
     return assignmentMatches(profile.school, submission.school, schoolAliasesFor);
   }
 
-  const auditorPost = profile.post || profile.assignment || profile.designation;
+  const auditorPosts = administrativePostsFor(profile);
   const submissionPost = submission.submittedByDesignation || submission.post || submission.department || submission.school;
-  return assignmentMatches(auditorPost, submissionPost, postAliasesFor);
+  return auditorPosts.some((post) => assignmentMatches(post, submissionPost, postAliasesFor));
 };
 
 const matchesAuditorSession = (submission, profile) => {
@@ -368,6 +405,7 @@ const normalizeSubmission = (submission = {}) => {
   const values = { ...formData.values, [SIGN_OFF_FIELD]: { ...storedSignOff, ...signOff } };
   const auditorSignOff = getAuditorSignOff(values);
   const archiveMetadata = values[REPORT_ARCHIVE_FIELD] || {};
+  const school = submission.school || submission.schoolName || submission.department || "School";
 
   return {
     ...submission,
@@ -375,8 +413,8 @@ const normalizeSubmission = (submission = {}) => {
     values,
     id: submission.id || submission.submissionId,
     auditType,
-    group: submission.group || submission.schoolGroup || "all",
-    school: submission.school || submission.schoolName || submission.department || "School",
+    group: normalizeSchoolGroup(submission.group || submission.schoolGroup, school, auditType),
+    school,
     submittedBy: signOff.submittedBy.name || submission.userName || "-",
     submittedByDesignation: signOff.submittedBy.designation || (auditType === "academic" ? "Director" : ""),
     submittedOn: signOff.submittedBy.date || new Date().toISOString(),
@@ -407,7 +445,7 @@ const normalizeSubmission = (submission = {}) => {
       submission.auditorType ||
       "",
     ),
-    auditCycle: submission.auditCycle || submission.cycleLabel || submission.auditPeriod || archiveMetadata.auditCycle || "2025-26",
+    auditCycle: submission.auditCycle || submission.cycleLabel || submission.auditPeriod || submission.academicYear || archiveMetadata.auditCycle || "2025-26",
     version: Number(submission.version || submission.reportVersion || submission.cycleVersion || archiveMetadata.version || 1),
     rootSubmissionId: submission.rootSubmissionId || submission.auditRootId || submission.id || submission.submissionId,
     parentSubmissionId: submission.parentSubmissionId || submission.previousSubmissionId || null,
@@ -470,6 +508,7 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
     designation: sessionStorage.getItem("designation") || roleConfig.roleTitle,
     school: sessionStorage.getItem("school") || "D Y Patil International University",
     post: sessionStorage.getItem("post") || "",
+    administrativePosts: valueList(sessionStorage.getItem("administrativePosts")),
     category: sessionStorage.getItem("category") || auditCategoryFromRole(role),
     auditorType: sessionStorage.getItem("auditorType") || auditorTypeFromRole(role),
     auditorRole: sessionStorage.getItem("auditorRole") || role,
@@ -946,7 +985,9 @@ export default function ReviewDashboard({ dashboardKind = "review" }) {
             />
           ) : visibleActiveView === "previous-reports" ? (
             <PreviousReportsPanel
+              key={academicYear}
               submissions={previousReports}
+              academicYear={academicYear}
               loading={loadingSubmissions}
               onOpen={openSubmission}
               onStartNextCycle={startNextAuditCycle}
@@ -1264,16 +1305,35 @@ function AuditorFinalReviewPanel({ submissions, loading, onOpen, onDownload, dow
   );
 }
 
-function PreviousReportsPanel({ submissions, loading, onOpen, onStartNextCycle, startingNextCycleId, onDownload, downloadingAttachmentsId }) {
+function PreviousReportsPanel({
+  submissions,
+  academicYear,
+  loading,
+  onOpen,
+  onStartNextCycle,
+  startingNextCycleId,
+  onDownload,
+  downloadingAttachmentsId,
+}) {
   const [activeAuditType, setActiveAuditType] = useState("all");
+  const currentYear = compactAcademicYear(academicYear);
+  const availableYears = useMemo(() => {
+    const years = new Set([currentYear]);
+    submissions.forEach((submission) => years.add(compactAcademicYear(submission.auditCycle || currentYear)));
+    return [...years].sort((first, second) => Number(second.slice(0, 4)) - Number(first.slice(0, 4)));
+  }, [currentYear, submissions]);
+  const [selectedYear, setSelectedYear] = useState(currentYear);
   const auditTypeTabs = [
     { id: "all", label: "All Reports" },
     { id: "academic", label: "Academic" },
     { id: "administrative", label: "Administrative" },
   ];
+  const yearSubmissions = submissions.filter(
+    (submission) => compactAcademicYear(submission.auditCycle || currentYear) === selectedYear
+  );
   const filteredSubmissions = activeAuditType === "all"
-    ? submissions
-    : submissions.filter((submission) => submission.auditType === activeAuditType);
+    ? yearSubmissions
+    : yearSubmissions.filter((submission) => submission.auditType === activeAuditType);
   const sectionTitle = activeAuditType === "all"
     ? "All Audit Reports"
     : `${titleCase(activeAuditType)} Audit Reports`;
@@ -1285,21 +1345,34 @@ function PreviousReportsPanel({ submissions, loading, onOpen, onStartNextCycle, 
           <h2 style={styles.sectionTitle}>Previous Reports</h2>
           <p style={styles.progressIntro}>Approved audit versions are preserved here as immutable historical records.</p>
         </div>
-        <span style={styles.schoolCount}>{submissions.length} reports</span>
+        <div style={styles.pageTitleActions}>
+          <label style={styles.yearFilter}>
+            <span>Academic year</span>
+            <select
+              className="audit-control"
+              value={selectedYear}
+              onChange={(event) => setSelectedYear(event.target.value)}
+              style={styles.yearSelect}
+            >
+              {availableYears.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </label>
+          <span style={styles.schoolCount}>{yearSubmissions.length} reports</span>
+        </div>
       </div>
 
       {loading && <SkeletonList rows={3} />}
-      {!loading && !submissions.length && (
-        <div style={styles.emptyDraftNotice}>No approved reports are available yet.</div>
+      {!loading && !yearSubmissions.length && (
+        <div style={styles.emptyDraftNotice}>No approved reports are available for {selectedYear}.</div>
       )}
 
-      {!loading && submissions.length > 0 && (
+      {!loading && yearSubmissions.length > 0 && (
         <div style={styles.previousReportGroups}>
           <div style={styles.tabs} role="tablist" aria-label="Previous report types">
             {auditTypeTabs.map((tab) => {
               const count = tab.id === "all"
-                ? submissions.length
-                : submissions.filter((submission) => submission.auditType === tab.id).length;
+                ? yearSubmissions.length
+                : yearSubmissions.filter((submission) => submission.auditType === tab.id).length;
               return (
                 <button
                   key={tab.id}
@@ -1317,7 +1390,7 @@ function PreviousReportsPanel({ submissions, loading, onOpen, onStartNextCycle, 
           </div>
 
           <PreviousReportAuditSection
-            key={activeAuditType}
+            key={`${selectedYear}-${activeAuditType}`}
             title={sectionTitle}
             reports={filteredSubmissions}
             onOpen={onOpen}
@@ -2468,7 +2541,35 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: 14,
+  },
+  pageTitleActions: {
+    display: "flex",
+    alignItems: "flex-end",
+    justifyContent: "flex-end",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  yearFilter: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 5,
+    color: "#475569",
+    fontSize: 10.5,
+    fontWeight: 750,
+  },
+  yearSelect: {
+    minWidth: 132,
+    height: 36,
+    border: "1px solid #cbd5e1",
+    borderRadius: 7,
+    padding: "6px 30px 6px 10px",
+    color: "#0f172a",
+    background: "#fff",
+    fontFamily: "inherit",
+    fontSize: 12,
+    fontWeight: 700,
   },
   sectionTitle: {
     margin: 0,
