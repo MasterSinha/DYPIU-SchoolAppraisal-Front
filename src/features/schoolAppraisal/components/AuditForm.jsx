@@ -259,7 +259,7 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
             <p style={styles.meta}>{schema.header.address}</p>
             <div style={styles.headerMetaRow}>
               <span style={styles.year}>Academic Year {academicYear}</span>
-              <span style={styles.draftPill}>Draft in progress</span>
+              <span style={styles.draftPill}>In Progress</span>
             </div>
           </div>
         </div>

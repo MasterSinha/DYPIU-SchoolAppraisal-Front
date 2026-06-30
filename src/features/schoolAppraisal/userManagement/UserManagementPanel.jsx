@@ -890,7 +890,7 @@ function AdministrativePostMultiSelect({ selected, onToggle }) {
     <details style={styles.multiSelect}>
       <summary style={styles.multiSelectSummary}>
         <span>{summary}</span>
-        <span aria-hidden="true">v</span>
+        <span aria-hidden="true">▾</span>
       </summary>
       <div style={styles.multiSelectMenu}>
         {ADMINISTRATIVE_POSTS.map((post) => (

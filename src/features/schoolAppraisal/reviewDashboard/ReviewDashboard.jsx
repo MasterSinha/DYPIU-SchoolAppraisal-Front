@@ -1126,8 +1126,6 @@ function OverviewPanel({ metrics, submissions, loading, onOpen }) {
           <div style={styles.auditSummaryRows}>
             <SummaryRow label="Academic Audit" value={metrics.academic} />
             <SummaryRow label="Administrative Audit" value={metrics.administrative} />
-            <SummaryRow label="Engineering Schools" value="4" />
-            <SummaryRow label="Non-Engineering Schools" value="4" />
           </div>
         </div>
 
@@ -1237,6 +1235,7 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
     engineering: submissions.filter((submission) => submission.group === "engineering").length,
     nonEngineering: submissions.filter((submission) => submission.group === "nonEngineering").length,
   };
+  const showGroupTabs = auditType === "academic";
 
   return (
     <section style={styles.panel}>
@@ -1244,22 +1243,28 @@ function AuditReviewPanel({ auditType, submissions, activeGroup, onGroupChange, 
         <div style={styles.blueHeading}>
           <h2 style={styles.sectionTitle}>{auditLabels[auditType]} Reviews</h2>
         </div>
-        <span style={styles.schoolCount}>{filtered.length} schools</span>
+        <span style={styles.schoolCount}>
+          {auditType === "administrative"
+            ? `${filtered.length} ${filtered.length === 1 ? "submission" : "submissions"}`
+            : `${filtered.length} ${filtered.length === 1 ? "school" : "schools"}`}
+        </span>
       </div>
 
-      <div style={styles.tabs} role="tablist" aria-label={`${auditLabels[auditType]} school groups`}>
-        {groupTabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            style={{ ...styles.tab, ...(activeGroup === tab.id ? styles.activeTab : {}) }}
-            onClick={() => onGroupChange(tab.id)}
-          >
-            {tab.label}
-            <span style={styles.tabCount}>{counts[tab.id]}</span>
-          </button>
-        ))}
-      </div>
+      {showGroupTabs && (
+        <div style={styles.tabs} role="tablist" aria-label={`${auditLabels[auditType]} school groups`}>
+          {groupTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              style={{ ...styles.tab, ...(activeGroup === tab.id ? styles.activeTab : {}) }}
+              onClick={() => onGroupChange(tab.id)}
+            >
+              {tab.label}
+              <span style={styles.tabCount}>{counts[tab.id]}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div style={styles.reviewList}>
         {loading && <SkeletonList rows={3} />}
@@ -1286,7 +1291,7 @@ function AuditorFinalReviewPanel({ submissions, loading, onOpen, onDownload, dow
         <div style={styles.blueHeading}>
           <h2 style={styles.sectionTitle}>Auditor Final Review</h2>
         </div>
-        <span style={styles.schoolCount}>{submissions.length} forms</span>
+        <span style={styles.schoolCount}>{submissions.length} {submissions.length === 1 ? "form" : "forms"}</span>
       </div>
 
       <div style={styles.reviewList}>
@@ -1492,11 +1497,15 @@ function SubmissionCard({
         <div style={styles.schoolAvatar}>{initialsFor(submission.school)}</div>
         <div style={styles.submissionTitleBlock}>
           <h3 style={styles.schoolName}>{submission.school}</h3>
-          <p style={styles.schoolMeta}>
-            {submission.auditType === "academic" ? "Director" : "Submitted by"}: {submission.submittedBy}
-            {submission.submittedByDesignation ? ` · ${submission.submittedByDesignation}` : ""}
-          </p>
-          <small style={styles.schoolGroup}>{SCHOOL_GROUPS[submission.group]}</small>
+          {(submission.auditType === "academic" || (submission.submittedBy && submission.submittedBy !== "-")) && (
+            <p style={styles.schoolMeta}>
+              {submission.auditType === "academic" ? "Director" : "Submitted by"}: {submission.submittedBy}
+              {submission.submittedByDesignation ? ` · ${submission.submittedByDesignation}` : ""}
+            </p>
+          )}
+          {submission.auditType === "academic" && (
+            <small style={styles.schoolGroup}>{SCHOOL_GROUPS[submission.group]}</small>
+          )}
         </div>
         <StatusBadge status={submission.status} />
       </div>
