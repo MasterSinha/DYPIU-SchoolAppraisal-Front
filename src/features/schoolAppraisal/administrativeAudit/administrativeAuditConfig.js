@@ -280,7 +280,7 @@ export const administrativeAuditModules = [
         columns: ["Sr No", "Activity details", "Organized by", "Date of conduction", "Number of beneficiaries / Participants", "Attachment"],
       },
       {
-        id: "studentAwards",
+        id: "adminStudentAwards",
         title: "5. Awards / Prizes / Recognitions in curricular and extended curricular areas",
         columns: ["Sr No", "Name of the award", "Team / Individual", "Inter-University / State / National / International", "Name of the event", "Name of the student(s)", "Attachment"],
       },
