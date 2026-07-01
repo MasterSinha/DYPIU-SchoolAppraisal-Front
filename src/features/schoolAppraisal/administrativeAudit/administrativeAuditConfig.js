@@ -102,6 +102,9 @@ export const administrativeAuditModules = [
             id: "facultyInformation",
             title: "Faculty Information",
             columns: ["Sr No", "Cadre", "Required", "Regular", "Contract"],
+            selectOptions: {
+              Cadre: ["Professor", "Associate Professor", "Assistant Professor"],
+            },
             initialRows: [
               { "Sr No": "1", Cadre: "Professors" },
               { "Sr No": "2", Cadre: "Associate Professors" },
@@ -110,6 +113,11 @@ export const administrativeAuditModules = [
             ],
           },
         ],
+      },
+      {
+        type: "attachment-field",
+        id: "bogMomSanctionedPostsAttachment",
+        label: "BoG MoM Extract showing Sanctioned Posts",
       },
       {
         type: "fields",
@@ -159,7 +167,7 @@ export const administrativeAuditModules = [
           {
             id: "staffTraining",
             title: "Administrative training / professional development program organized for non-teaching staff",
-            columns: ["Sr no", "Title of the Course", "Details of resource person", "Duration and date of conduction", "No of beneficiaries"],
+            columns: ["Sr no", "Title of the Course", "Details of resource person", "Duration and date of conduction", "No of beneficiaries", "Attachment (Report of the Event)"],
           },
         ],
       },
