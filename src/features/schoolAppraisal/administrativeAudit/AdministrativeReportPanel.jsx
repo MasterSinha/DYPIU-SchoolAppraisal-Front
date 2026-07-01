@@ -92,6 +92,10 @@ export default function AdministrativeReportPanel({
                 );
               }
 
+              if (!Array.isArray(block.tables)) {
+                return null;
+              }
+
               return block.tables.map((table) => (
                 <div className="generated-report__table-block" key={table.id} style={styles.tableBlock}>
                   <h4 className="generated-report__table-title" style={styles.tableTitle}>{table.title}</h4>
