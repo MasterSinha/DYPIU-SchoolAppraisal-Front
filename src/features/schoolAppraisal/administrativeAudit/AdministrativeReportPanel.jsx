@@ -70,6 +70,16 @@ export default function AdministrativeReportPanel({
                 );
               }
 
+              if (block.type === "attachment-field") {
+                return (
+                  <ReportFieldsTable
+                    key={`attachment-${block.id}`}
+                    fields={[{ id: block.id, label: block.label }]}
+                    values={data.fields}
+                  />
+                );
+              }
+
               if (block.type === "part-e-schools") {
                 return (
                   <AdministrativePartE
@@ -204,7 +214,7 @@ function ReportFieldsTable({ fields, values }) {
         ) : (
           <tr key={field.id}>
             <th scope="row" style={styles.detailLabel}>{field.label}</th>
-            <td style={styles.detailValue}>{values[field.id] || "-"}</td>
+            <td style={styles.detailValue}><ReportCellValue value={values[field.id]} /></td>
           </tr>
         ))}
       </tbody>

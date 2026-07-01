@@ -94,6 +94,7 @@ const moduleFieldsFor = (module) =>
   moduleBlocksFor(module)
     .flatMap((block) => {
       if (block.type === "fields") return block.fields;
+      if (block.type === "attachment-field") return [{ id: block.id, initialValue: [] }];
       if (block.type === "part-e-schools") return [{ id: block.fieldId, initialValue: [] }];
       return [];
     })
@@ -608,6 +609,20 @@ export default function AdministrativeAuditDashboard() {
                   );
                 }
 
+                if (block.type === "attachment-field") {
+                  return (
+                    <AttachmentField
+                      key={`attachment-${block.id}`}
+                      label={block.label}
+                      value={data.fields[block.id]}
+                      onChange={(value) => setFieldValue(block.id, value)}
+                      onUploadAttachment={uploadFormAttachments}
+                      onDeleteAttachment={deleteFormAttachment}
+                      readOnly={readOnly}
+                    />
+                  );
+                }
+
                 if (block.type === "part-e-schools") {
                   return (
                     <AdministrativePartE
@@ -715,6 +730,122 @@ function PrintStyles() {
         }
       }
     `}</style>
+  );
+}
+
+function AttachmentField({
+  label,
+  value = [],
+  onChange,
+  onUploadAttachment,
+  onDeleteAttachment,
+  readOnly = false,
+}) {
+  const files = Array.isArray(value) ? value : value ? [value] : [];
+  const [uploading, setUploading] = useState(false);
+  const [deletingUrl, setDeletingUrl] = useState("");
+  const [error, setError] = useState("");
+
+  const handleUpload = async (selectedFiles) => {
+    const nextFiles = Array.from(selectedFiles || []);
+    if (readOnly || !nextFiles.length) return;
+
+    setError("");
+    const invalidType = nextFiles.find((file) => file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf"));
+    if (invalidType) {
+      setError("Only PDF attachments are allowed.");
+      return;
+    }
+    if (nextFiles.some((file) => file.size > 10 * 1024 * 1024)) {
+      setError("Attachment must be 10MB or smaller.");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const uploaded = onUploadAttachment
+        ? await onUploadAttachment(nextFiles)
+        : nextFiles.map((file) => ({ name: file.name, fileName: file.name, url: URL.createObjectURL(file) }));
+      onChange?.([...files, ...uploaded]);
+    } catch (uploadError) {
+      setError(getApiErrorMessage(uploadError, "Attachment upload failed."));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (attachment) => {
+    if (readOnly) return;
+    if (!attachment?.url) {
+      setError("Could not delete attachment because its URL is missing.");
+      return;
+    }
+    if (!window.confirm(`Remove ${attachment.name || attachment.fileName || "this attachment"}?`)) return;
+
+    setDeletingUrl(attachment.url);
+    setError("");
+    try {
+      await onDeleteAttachment?.(attachment);
+      onChange?.(files.filter((file) => file.url !== attachment.url));
+    } catch (deleteError) {
+      setError(getApiErrorMessage(deleteError, "Could not delete attachment."));
+    } finally {
+      setDeletingUrl("");
+    }
+  };
+
+  return (
+    <section style={styles.attachmentField}>
+      <div style={styles.attachmentFieldLabel}>{label}</div>
+      {error && <div style={styles.attachmentFieldError}>{error}</div>}
+      <div style={styles.attachmentFieldBody}>
+        {files.length ? (
+          <div style={styles.attachmentList}>
+            {files.map((file, index) => (
+              <article key={`${file.url || file.name || "attachment"}-${index}`} style={styles.attachmentCard}>
+                <div style={styles.attachmentName}>{file.name || file.fileName || "Attached document"}</div>
+                <div style={styles.attachmentActions}>
+                  {file.url && (
+                    <a href={file.url} target="_blank" rel="noreferrer" style={styles.attachmentOpen}>
+                      Open
+                    </a>
+                  )}
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      style={styles.attachmentRemove}
+                      onClick={() => handleDelete(file)}
+                      disabled={deletingUrl === file.url}
+                    >
+                      {deletingUrl === file.url ? "Removing..." : "Remove"}
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div style={styles.attachmentEmpty}>No document attached.</div>
+        )}
+        {!readOnly && (
+          <label style={styles.attachmentUploadButton}>
+            {uploading ? "Uploading..." : "Attach PDF"}
+            <input
+              type="file"
+              accept=".pdf,application/pdf"
+              multiple
+              onChange={(event) => {
+                handleUpload(event.target.files);
+                event.target.value = "";
+              }}
+              style={styles.attachmentFileInput}
+              disabled={uploading}
+              aria-label={label}
+            />
+          </label>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -1164,6 +1295,111 @@ const styles = {
     color: "#334155",
     fontSize: 12,
     fontWeight: 650,
+  },
+  attachmentField: {
+    margin: "0 0 16px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  attachmentFieldLabel: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: 700,
+  },
+  attachmentFieldBody: {
+    display: "flex",
+    alignItems: "flex-start",
+    flexWrap: "wrap",
+    gap: 10,
+    padding: 12,
+    border: "1px solid #d7dee9",
+    borderRadius: 8,
+    background: "#fbfcfe",
+  },
+  attachmentList: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))",
+    flex: "1 1 320px",
+    gap: 10,
+  },
+  attachmentCard: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    padding: 10,
+    border: "1px solid #dbe3ef",
+    borderRadius: 8,
+    background: "#fff",
+  },
+  attachmentName: {
+    minWidth: 0,
+    color: "#1e293b",
+    fontSize: 12,
+    fontWeight: 700,
+    overflowWrap: "anywhere",
+  },
+  attachmentActions: {
+    display: "flex",
+    flexShrink: 0,
+    gap: 8,
+  },
+  attachmentOpen: {
+    border: "1px solid #bfdbfe",
+    borderRadius: 6,
+    color: "#1d4ed8",
+    background: "#eff6ff",
+    padding: "5px 9px",
+    fontSize: 11,
+    fontWeight: 750,
+    textDecoration: "none",
+  },
+  attachmentRemove: {
+    border: "1px solid #fecaca",
+    borderRadius: 6,
+    color: "#b91c1c",
+    background: "#fff",
+    padding: "5px 9px",
+    fontSize: 11,
+    fontWeight: 750,
+    cursor: "pointer",
+  },
+  attachmentEmpty: {
+    flex: "1 1 240px",
+    color: "#64748b",
+    fontSize: 12,
+    padding: "8px 0",
+  },
+  attachmentUploadButton: {
+    position: "relative",
+    overflow: "hidden",
+    flex: "0 0 auto",
+    border: "1px solid #bfdbfe",
+    borderRadius: 7,
+    color: "#1d4ed8",
+    background: "#eff6ff",
+    padding: "8px 12px",
+    fontSize: 12,
+    fontWeight: 750,
+    cursor: "pointer",
+  },
+  attachmentFileInput: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    opacity: 0,
+    cursor: "pointer",
+  },
+  attachmentFieldError: {
+    border: "1px solid #fecaca",
+    borderRadius: 8,
+    background: "#fef2f2",
+    color: "#991b1b",
+    padding: "9px 10px",
+    fontSize: 12,
+    fontWeight: 700,
   },
   input: {
     width: "100%",
