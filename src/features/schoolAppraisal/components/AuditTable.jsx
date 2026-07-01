@@ -9,6 +9,8 @@ const isAttachmentColumn = (column, table = {}) =>
 const isDateColumn = (column, table = {}) =>
   table.dateColumns?.includes(column) || /^\s*date\s*$/i.test(column);
 const isUrlColumn = (column, table = {}) => table.urlColumns?.includes(column);
+const isNumberColumn = (column, table = {}) => table.numberColumns?.includes(column);
+const selectOptionsFor = (column, table = {}) => table.selectOptions?.[column] || null;
 
 export default function AuditTable({
   table,
@@ -290,9 +292,35 @@ export default function AuditTable({
                         readOnly={readOnly}
                         aria-label={`${table.title} ${column}`}
                       />
+                    ) : selectOptionsFor(column, table) ? (
+                      <select
+                        className="audit-table-input"
+                        value={row[column] ?? ""}
+                        onChange={(event) => handleCellChange(rowIndex, column, event.target.value)}
+                        style={{
+                          ...styles.cellInput,
+                          ...(fitToContainer ? styles.fittedCellInput : {}),
+                        }}
+                        disabled={readOnly || Boolean(serialColumnFor([column]))}
+                        aria-label={`${table.title} ${column}`}
+                      >
+                        <option value="">Select</option>
+                        {[
+                          ...selectOptionsFor(column, table),
+                          ...(
+                            row[column] && !selectOptionsFor(column, table).includes(row[column])
+                              ? [row[column]]
+                              : []
+                          ),
+                        ].map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
                     ) : (
                       <input className="audit-table-input"
-                        type={isUrlColumn(column, table) ? "url" : "text"}
+                        type={isUrlColumn(column, table) ? "url" : isNumberColumn(column, table) ? "number" : "text"}
+                        min={isNumberColumn(column, table) ? "0" : undefined}
+                        step={isNumberColumn(column, table) ? "1" : undefined}
                         value={row[column] ?? ""}
                         onChange={(event) => handleCellChange(rowIndex, column, event.target.value)}
                         style={{

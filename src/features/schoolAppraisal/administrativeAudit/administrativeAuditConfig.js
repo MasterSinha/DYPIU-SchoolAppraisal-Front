@@ -29,18 +29,21 @@ export const administrativeAuditModules = [
       {
         id: "coursesOffered",
         title: "1. Courses Offered",
-        columns: ["Sr No", "Name of the Program", "Level (UG/PG)", "Intake", "Year of Commencement of the program"],
+        columns: ["Sr No", "Name of the Program", "Level (UG/PG)", "Intake", "No. of Students Admitted", "Year of Commencement of the program", "Attachment (Attach List of the Students)"],
+        numberColumns: ["No. of Students Admitted"],
       },
       {
         id: "studentStatistics",
         title: "2. Total Number of Students in the university",
         columns: ["Sr No", "Category", "U.G.", "P.G.", "Ph.D.", "Value added / skill Courses"],
+        selectOptions: {
+          Category: ["SC", "ST", "OBC", "General"],
+        },
         initialRows: [
-          { "Sr No": "1", Category: "Open" },
-          { "Sr No": "2", Category: "OBC" },
-          { "Sr No": "3", Category: "SC" },
-          { "Sr No": "4", Category: "ST" },
-          { "Sr No": "5", Category: "Others" },
+          { "Sr No": "1", Category: "SC" },
+          { "Sr No": "2", Category: "ST" },
+          { "Sr No": "3", Category: "OBC" },
+          { "Sr No": "4", Category: "General" },
         ],
       },
       {
