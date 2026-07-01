@@ -1868,6 +1868,16 @@ function SubmittedFormViewer({ sections, formData, auditType, activeSectionIndex
               );
             }
 
+            if (block.type === "attachment-field") {
+              return (
+                <ReadOnlyFieldGrid
+                  key={`${activeSection.id}-attachment-${block.id}`}
+                  fields={[{ id: block.id, label: block.label }]}
+                  values={formData.values}
+                />
+              );
+            }
+
             if (block.type === "part-e-schools") {
               return (
                 <AdministrativePartE
@@ -1877,6 +1887,10 @@ function SubmittedFormViewer({ sections, formData, auditType, activeSectionIndex
                   readOnly
                 />
               );
+            }
+
+            if (!Array.isArray(block.tables)) {
+              return null;
             }
 
             return (

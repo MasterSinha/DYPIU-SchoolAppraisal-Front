@@ -109,6 +109,8 @@ const ensureDefaultTableRows = (tables = {}) => {
     moduleTablesFor(module).forEach((table) => {
       if (!Array.isArray(nextTables[table.id]) || !nextTables[table.id].length) {
         nextTables[table.id] = [emptyRowFor(table.columns, 0)];
+      } else {
+        nextTables[table.id] = normalizeRows(table.columns, nextTables[table.id]);
       }
     });
   });
