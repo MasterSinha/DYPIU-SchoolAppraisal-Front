@@ -30,6 +30,7 @@ import UserManagementPanel from "../userManagement/UserManagementPanel";
 import { ADMINISTRATIVE_POSTS, SCHOOL_OPTIONS, schoolGroupFor } from "../userManagement/userManagementConfig";
 import BackupRestorePanel from "./BackupRestorePanel";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
+import { getAttachmentUrl } from "../../../utils/attachment";
 
 const REVIEW_NAV_ITEMS = [
   { id: "overview", title: "Overview" },
@@ -2082,7 +2083,7 @@ function renderValue(value) {
           <small style={styles.mutedText}>PDF document</small>
         </span>
         {url ? (
-          <a href={url} target="_blank" rel="noreferrer" style={styles.attachmentLink} title="Open document">
+          <a href={getAttachmentUrl(url)} target="_blank" rel="noreferrer" style={styles.attachmentLink} title="Open document">
             Open
           </a>
         ) : (

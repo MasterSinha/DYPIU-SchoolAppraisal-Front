@@ -13,6 +13,7 @@ import AdministrativeReportPanel from "./AdministrativeReportPanel";
 import AdministrativePartE from "./AdministrativePartE";
 import AppSidebar from "../components/AppSidebar";
 import { administrativeAuditMeta, administrativeAuditModules } from "./administrativeAuditConfig";
+import { getAttachmentUrl } from "../../../utils/attachment";
 
 const administrativeUserModules = [
   ...administrativeAuditModules.filter((module) => module.id !== "section-f-observations-recommendations"),
@@ -796,7 +797,7 @@ function AttachmentField({
                 <div style={styles.attachmentName}>{file.name || file.fileName || "Attached document"}</div>
                 <div style={styles.attachmentActions}>
                   {file.url && (
-                    <a href={file.url} target="_blank" rel="noreferrer" style={styles.attachmentOpen}>
+                    <a href={getAttachmentUrl(file.url)} target="_blank" rel="noreferrer" style={styles.attachmentOpen}>
                       Open
                     </a>
                   )}

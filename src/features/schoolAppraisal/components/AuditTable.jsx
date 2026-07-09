@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
 import { columnsWithSerial, serialColumnFor } from "./tableHelpers";
+import { getAttachmentUrl } from "../../../utils/attachment";
 import DateInput from "./DateInput";
 
 const isAttachmentColumn = (column, table = {}) =>
@@ -204,7 +205,7 @@ export default function AuditTable({
                                   <div style={styles.attachmentItemActions}>
                                     <a
                                       className="audit-attachment-view"
-                                      href={file.url}
+                                      href={getAttachmentUrl(file.url)}
                                       target="_blank"
                                       rel="noreferrer"
                                       style={styles.attachmentLink}

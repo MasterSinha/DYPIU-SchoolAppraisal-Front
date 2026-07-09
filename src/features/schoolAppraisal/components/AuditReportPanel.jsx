@@ -2,6 +2,7 @@ import { columnsWithSerial } from "./tableHelpers";
 import universityLogo from "../../../assets/images/image.png";
 import { SIGN_OFF_FIELD } from "../../../api/submissions";
 import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
+import { getAttachmentUrl } from "../../../utils/attachment";
 
 const blocksFor = (section) =>
   section.blocks || [
@@ -193,7 +194,7 @@ function ReportCellValue({ value }) {
   if (typeof value !== "object") return isOmittedReportText(value) ? "-" : String(value);
   const name = value.name || value.fileName || value.filename || "View attachment";
   const url = value.url || value.publicUrl || value.downloadUrl;
-  return url ? <a className="generated-report__attachment" href={url} target="_blank" rel="noreferrer">{name}</a> : name;
+  return url ? <a className="generated-report__attachment" href={getAttachmentUrl(url)} target="_blank" rel="noreferrer">{name}</a> : name;
 }
 
 const styles = {
