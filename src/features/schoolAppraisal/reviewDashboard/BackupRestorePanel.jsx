@@ -6,6 +6,10 @@ export default function BackupRestorePanel() {
   const [uploadsLoading, setUploadsLoading] = useState(false);
   const [dbRestoring, setDbRestoring] = useState(false);
   const [uploadsRestoring, setUploadsRestoring] = useState(false);
+  
+  const [dbProgress, setDbProgress] = useState(0);
+  const [uploadsProgress, setUploadsProgress] = useState(0);
+
   const [statusMessage, setStatusMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
 
@@ -75,6 +79,7 @@ export default function BackupRestorePanel() {
     }
 
     setDbRestoring(true);
+    setDbProgress(0);
     setErrorMessage(null);
     setStatusMessage(null);
 
@@ -84,12 +89,17 @@ export default function BackupRestorePanel() {
     try {
       const response = await apiClient.post("/api/backup/db/restore", formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          setDbProgress(percentCompleted);
+        },
       });
       setStatusMessage(response.data?.message || "Database successfully restored.");
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error, "Failed to restore database."));
     } finally {
       setDbRestoring(false);
+      setDbProgress(0);
       if (dbInputRef.current) dbInputRef.current.value = "";
     }
   };
@@ -103,6 +113,7 @@ export default function BackupRestorePanel() {
     }
 
     setUploadsRestoring(true);
+    setUploadsProgress(0);
     setErrorMessage(null);
     setStatusMessage(null);
 
@@ -112,12 +123,17 @@ export default function BackupRestorePanel() {
     try {
       const response = await apiClient.post("/api/backup/uploads/restore", formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          setUploadsProgress(percentCompleted);
+        },
       });
       setStatusMessage(response.data?.message || "Uploads ZIP successfully restored.");
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error, "Failed to restore uploads ZIP."));
     } finally {
       setUploadsRestoring(false);
+      setUploadsProgress(0);
       if (uploadsInputRef.current) uploadsInputRef.current.value = "";
     }
   };
@@ -205,6 +221,15 @@ export default function BackupRestorePanel() {
               <span>{dbRestoring ? "Restoring Database..." : "Click to choose SQL dump file"}</span>
               <small style={styles.dropzoneSmall}>Only .sql files are allowed</small>
             </button>
+
+            {dbRestoring && (
+              <div style={styles.progressContainer}>
+                <div style={{ ...styles.progressBar, width: `${dbProgress}%` }} />
+                <span style={styles.progressText}>
+                  {dbProgress === 100 ? "Restoring schema & data..." : `Uploading: ${dbProgress}%`}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -266,6 +291,15 @@ export default function BackupRestorePanel() {
               <span>{uploadsRestoring ? "Uploading & Restoring..." : "Click to choose ZIP backup archive"}</span>
               <small style={styles.dropzoneSmall}>Only .zip files are allowed</small>
             </button>
+
+            {uploadsRestoring && (
+              <div style={styles.progressContainer}>
+                <div style={{ ...styles.progressBar, width: `${uploadsProgress}%` }} />
+                <span style={styles.progressText}>
+                  {uploadsProgress === 100 ? "Extracting backup ZIP..." : `Uploading: ${uploadsProgress}%`}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -468,5 +502,34 @@ const styles = {
     padding: "10px 14px",
     fontSize: "13px",
     marginBottom: "14px",
+  },
+  progressContainer: {
+    width: "100%",
+    height: "22px",
+    background: "#f1f5f9",
+    border: "1px solid #cbd5e1",
+    borderRadius: "6px",
+    marginTop: "10px",
+    position: "relative",
+    overflow: "hidden",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  progressBar: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    height: "100%",
+    background: "linear-gradient(135deg, #3b82f6, #2563eb)",
+    transition: "width 0.15s ease-out",
+  },
+  progressText: {
+    position: "relative",
+    zIndex: 1,
+    fontSize: "11px",
+    fontWeight: "750",
+    color: "#1e293b",
+    textShadow: "0 0 2px #fff",
   },
 };
