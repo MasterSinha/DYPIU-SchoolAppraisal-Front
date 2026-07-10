@@ -1,4 +1,4 @@
-const DATE_PATTERN = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+const DATE_PATTERN = /^(\d{2})[-/](\d{2})[-/](\d{4})$/;
 
 export const formatDateInput = (value = "") => {
   const digits = String(value).replace(/\D/g, "").slice(0, 8);
@@ -18,7 +18,7 @@ export const isValidDateDDMMYYYY = (value = "") => {
 
 export const formatDateDDMMYYYY = (value, fallback = "-") => {
   if (!value) return fallback;
-  if (isValidDateDDMMYYYY(value)) return String(value);
+  if (isValidDateDDMMYYYY(value)) return String(value).replaceAll("-", "/");
 
   const isoDate = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (isoDate) return `${isoDate[3]}/${isoDate[2]}/${isoDate[1]}`;

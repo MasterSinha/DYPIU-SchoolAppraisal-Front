@@ -3,6 +3,7 @@ import { useState } from "react";
 import { getApiErrorMessage } from "../../../api/client";
 import { columnsWithSerial, serialColumnFor } from "./tableHelpers";
 import { getAttachmentUrl } from "../../../utils/attachment";
+import { formatDateDDMMYYYY } from "../../../utils/dateFormat";
 import DateInput from "./DateInput";
 
 const isAttachmentColumn = (column, table = {}) =>
@@ -12,6 +13,87 @@ const isDateColumn = (column, table = {}) =>
 const isUrlColumn = (column, table = {}) => table.urlColumns?.includes(column);
 const isNumberColumn = (column, table = {}) => table.numberColumns?.includes(column);
 const selectOptionsFor = (column, table = {}) => table.selectOptions?.[column] || null;
+const normalizeColumnName = (value = "") =>
+  String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/\bthe\b/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+const isEmptyCell = (value) => value === undefined || value === null || String(value).trim() === "";
+const isEmptyImportedRow = (row, columns) => columns.every((column) => isEmptyCell(row[column]));
+const readFileAsArrayBuffer = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("Could not read file."));
+    reader.readAsArrayBuffer(file);
+  });
+const rowFromColumns = (columns, index) => columns.reduce((row, column) => {
+  row[column] = serialColumnFor([column]) ? String(index + 1) : "";
+  return row;
+}, {});
+const formatImportedCell = (value, column, table) => {
+  if (isEmptyCell(value)) return "";
+  if (isDateColumn(column, table)) return formatDateDDMMYYYY(value, "");
+  return String(value).trim();
+};
+const findMatchingColumn = (header, columns) => {
+  const normalizedHeader = normalizeColumnName(header);
+  if (!normalizedHeader) return "";
+  return columns.find((column) => normalizeColumnName(column) === normalizedHeader)
+    || columns.find((column) => {
+      const normalizedColumn = normalizeColumnName(column);
+      return normalizedColumn && (
+        normalizedColumn.includes(normalizedHeader)
+        || normalizedHeader.includes(normalizedColumn)
+      );
+    })
+    || "";
+};
+
+const parseWorkbookRows = async (file, table, columns) => {
+  const XLSX = await import("xlsx");
+  const buffer = await readFileAsArrayBuffer(file);
+  const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) throw new Error("No worksheet found in this file.");
+
+  const sheetRows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
+    header: 1,
+    blankrows: false,
+    defval: "",
+    raw: false,
+  });
+  const nonEmptyRows = sheetRows.filter((row = []) => row.some((cell) => !isEmptyCell(cell)));
+  const headerIndex = nonEmptyRows.findIndex((row = []) => {
+    const matchedColumns = new Set(row.map((cell) => findMatchingColumn(cell, columns)).filter(Boolean));
+    return matchedColumns.size >= Math.min(2, columns.length);
+  });
+
+  if (headerIndex < 0) {
+    throw new Error("Could not match the sheet headers with this table. Use the same column names shown in the table.");
+  }
+
+  const headerRow = nonEmptyRows[headerIndex];
+  const columnIndexes = headerRow.reduce((indexes, header, index) => {
+    const matchingColumn = findMatchingColumn(header, columns);
+    if (matchingColumn && indexes[matchingColumn] === undefined) indexes[matchingColumn] = index;
+    return indexes;
+  }, {});
+
+  const importedRows = nonEmptyRows.slice(headerIndex + 1).map((sheetRow, index) => {
+    const row = rowFromColumns(columns, index);
+    columns.forEach((column) => {
+      if (columnIndexes[column] !== undefined) row[column] = formatImportedCell(sheetRow[columnIndexes[column]], column, table);
+    });
+    const serialColumn = serialColumnFor(columns);
+    if (serialColumn && !row[serialColumn]) row[serialColumn] = String(index + 1);
+    return row;
+  }).filter((row) => !isEmptyImportedRow(row, columns.filter((column) => !serialColumnFor([column]))));
+
+  if (!importedRows.length) throw new Error("No data rows found after the matched header row.");
+  return importedRows;
+};
 
 export default function AuditTable({
   table,
@@ -20,6 +102,7 @@ export default function AuditTable({
   onFieldChange,
   onChange,
   onCellChange,
+  onRowsChange,
   onAddRow,
   onDeleteLastRow,
   onUploadAttachment,
@@ -34,6 +117,7 @@ export default function AuditTable({
   const [uploadingCell, setUploadingCell] = useState("");
   const [deletingAttachment, setDeletingAttachment] = useState("");
   const [uploadError, setUploadError] = useState("");
+  const [importingRows, setImportingRows] = useState(false);
 
   const handleCellChange = (rowIndex, column, value) => {
     if (onChange) {
@@ -42,6 +126,29 @@ export default function AuditTable({
     }
 
     onCellChange?.(table.id, rowIndex, column, value);
+  };
+
+  const handleExcelImport = async (selectedFiles) => {
+    const file = selectedFiles?.[0];
+    if (readOnly || !file) return;
+
+    setUploadError("");
+    const fileName = file.name.toLowerCase();
+    const validFile = /\.(xlsx|xls|csv|tsv)$/i.test(fileName);
+    if (!validFile) {
+      setUploadError("Upload an Excel, CSV, or TSV file.");
+      return;
+    }
+
+    setImportingRows(true);
+    try {
+      const importedRows = await parseWorkbookRows(file, table, columns);
+      onRowsChange?.(table, importedRows);
+    } catch (error) {
+      setUploadError(error?.message || "Could not import this sheet.");
+    } finally {
+      setImportingRows(false);
+    }
   };
 
   const handleAttachmentChange = async (rowIndex, column, selectedFiles) => {
@@ -126,6 +233,25 @@ export default function AuditTable({
       {table.showTitle !== false && (
         <div style={styles.header}>
           <h3 style={styles.title}>{table.title}</h3>
+          {table.excelImport && (
+            <label style={{
+              ...styles.importButton,
+              ...(readOnly || importingRows ? styles.importButtonDisabled : {}),
+            }}>
+              {importingRows ? "Importing..." : "📤 Upload Excel"}
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv,.tsv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/tab-separated-values"
+                onChange={(event) => {
+                  handleExcelImport(event.target.files);
+                  event.target.value = "";
+                }}
+                style={styles.fileInput}
+                disabled={readOnly || importingRows}
+                aria-label={`Upload Excel file for ${table.title}`}
+              />
+            </label>
+          )}
         </div>
       )}
 
@@ -388,6 +514,23 @@ const styles = {
     lineHeight: 1.35,
     color: "#0f172a",
     fontWeight: 700,
+  },
+  importButton: {
+    position: "relative",
+    flex: "0 0 auto",
+    overflow: "hidden",
+    border: "1px solid #bfdbfe",
+    borderRadius: 7,
+    color: "#1d4ed8",
+    background: "#eff6ff",
+    padding: "8px 12px",
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  importButtonDisabled: {
+    opacity: 0.62,
+    cursor: "not-allowed",
   },
   notes: {
     padding: "0 14px 12px",
