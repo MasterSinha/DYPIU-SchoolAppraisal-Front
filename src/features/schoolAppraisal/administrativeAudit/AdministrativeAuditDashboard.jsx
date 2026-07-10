@@ -294,6 +294,17 @@ export default function AdministrativeAuditDashboard() {
     }));
   };
 
+  const setTableRows = (table, rows) => {
+    setData((current) => ({
+      ...current,
+      tables: {
+        ...current.tables,
+        [table.id]: normalizeRows(table.columns, rows.length ? rows : [emptyRowFor(table.columns, 0)]),
+      },
+      lastSavedAt: new Date().toISOString(),
+    }));
+  };
+
   const addRow = (table) => {
     setData((current) => ({
       ...current,
@@ -661,6 +672,7 @@ export default function AdministrativeAuditDashboard() {
                         table={table}
                         rows={data.tables[table.id] || []}
                         onCellChange={setCellValue}
+                        onRowsChange={setTableRows}
                         onAddRow={addRow}
                         onDeleteLastRow={deleteLastRow}
                         onUploadAttachment={uploadFormAttachments}

@@ -1,7 +1,9 @@
 import { formatDateDDMMYYYY, formatDateInput, isValidDateDDMMYYYY } from "../../../utils/dateFormat";
 
 export default function DateInput({ value = "", onChange, readOnly = false, className = "", style, ...props }) {
-  const displayValue = /^\d{4}-\d{2}-\d{2}/.test(String(value)) ? formatDateDDMMYYYY(value, "") : value;
+  const displayValue = /^\d{4}-\d{2}-\d{2}/.test(String(value)) || isValidDateDDMMYYYY(value)
+    ? formatDateDDMMYYYY(value, "")
+    : value;
   const hasInvalidValue = Boolean(displayValue) && String(displayValue).length === 10 && !isValidDateDDMMYYYY(displayValue);
 
   return (
