@@ -2752,6 +2752,10 @@ function SubmittedFormViewer({
     auditType === "academic" &&
     activeSection?.id === ACADEMIC_PART_E_SECTION_ID &&
     hasAcademicPartEValues(previousInternalPartEValues);
+  const showPreviousInternalPartF =
+    auditType === "administrative" &&
+    activeSection?.id === "section-f-observations-recommendations" &&
+    submittedAuditorAssignments.some((a) => a.auditorType === "internal");
   const showSubmittedAuditorReviews =
     activeSectionIsAuditorOwned &&
     !editableSection &&
@@ -2814,6 +2818,26 @@ function SubmittedFormViewer({
                     </div>
                     <div style={styles.partECurrentBlock}>
                       <h4 style={styles.partEReferenceTitle}>External Auditor Part E - Current External Audit</h4>
+                      {currentFields}
+                    </div>
+                  </div>
+                );
+              }
+
+              if (showPreviousInternalPartF) {
+                const internalAssignments = submittedAuditorAssignments.filter((a) => a.auditorType === "internal");
+                return (
+                  <div key={`${activeSection.id}-part-f-comparison-${blockIndex}`} style={styles.partEComparison}>
+                    <div style={styles.partEReferenceBlock}>
+                      <h4 style={styles.partEReferenceTitle}>Internal Auditor Observations & Recommendations</h4>
+                      <AuditorAssignmentReviewGrid
+                        fields={block.fields}
+                        assignments={internalAssignments}
+                        fallbackAuditorType="internal"
+                      />
+                    </div>
+                    <div style={styles.partECurrentBlock}>
+                      <h4 style={styles.partEReferenceTitle}>External Auditor Observations & Recommendations</h4>
                       {currentFields}
                     </div>
                   </div>
