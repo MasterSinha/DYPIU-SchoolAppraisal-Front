@@ -5,6 +5,6 @@ import { fileURLToPath } from 'node:url'
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
   root: fileURLToPath(new URL('.', import.meta.url)),
-  base: mode === 'vm' ? '/AAA/' : '/',
+  base: mode === 'production' || mode === 'vm' ? '/AAA/' : '/',
   plugins: [react()],
 }))

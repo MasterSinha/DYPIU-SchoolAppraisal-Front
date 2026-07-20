@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm install --no-audit --no-fund
-ARG MODE=production
+ARG MODE=vm
 COPY . .
 RUN npm run build -- --mode ${MODE}
 
