@@ -2292,9 +2292,11 @@ function SubmissionCard({
       <AuditorProgressPanel submission={submission} compact />
 
       <div style={styles.cardActions}>
-        {onForward && canForwardSubmissionToAuditor(submission) && !isAuditorCompleted(submission) && !hasAuditorAssignment(submission) && (
+        {onForward && canForwardSubmissionToAuditor(submission) && !isAuditorCompleted(submission) && (
           <button type="button" className="btn btn-secondary" onClick={onForward}>
-            Forward to Auditor
+            {hasAuditorAssignment(submission) || ["UNDER_REVIEW", "FORWARDED_TO_INTERNAL_AUDITOR", "FORWARDED_TO_EXTERNAL_AUDITOR"].includes((submission.status || "").toUpperCase())
+              ? "Change Auditor"
+              : "Forward to Auditor"}
           </button>
         )}
         {onStartNextCycle && (
