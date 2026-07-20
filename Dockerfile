@@ -14,7 +14,7 @@ COPY deploy/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 
 ENV VITE_API_BASE_URL=""
-ENV BACKEND_URL=https://schoolappraisal-backend-919405994318.asia-south1.run.app
+ENV BACKEND_URL=http://127.0.0.1:8001
 ENV PORT=8080
 
 EXPOSE 8080
