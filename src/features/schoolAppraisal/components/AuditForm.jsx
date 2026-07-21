@@ -492,21 +492,6 @@ export default function AuditForm({ schema, academicYear = schema.academicYear, 
               academicPartEReview={auditType === "academic" ? academicPartEReview : null}
             />
           ))}
-        {!loadingDraft && isLastSection && academicPartEReview && academicPartESection && (
-          <AuditSection
-            section={academicPartESection}
-            values={values}
-            tables={tables}
-            onFieldChange={() => {}}
-            onTableChange={() => {}}
-            onAddRow={() => {}}
-            onDeleteLastRow={() => {}}
-            onUploadAttachment={async () => []}
-            onDeleteAttachment={async () => {}}
-            readOnly
-            academicPartEReview={academicPartEReview}
-          />
-        )}
       </div>
 
       {isLastSection && !isSubmitted && (
