@@ -95,8 +95,18 @@ const getAuditorSignOff = (entry = {}) => {
   };
 };
 
-const normalizedAssignmentValues = (assignment = {}) =>
-  safeJsonParse(assignment.values || assignment.valuesData || assignment.reviewValues || assignment.reviewValuesData, {});
+const normalizedAssignmentValues = (assignment = {}) => {
+  const parsed = typeof assignment.values === "object" && assignment.values !== null
+    ? assignment.values
+    : safeJsonParse(assignment.valuesData || assignment.values || assignment.reviewValues || assignment.reviewValuesData, {});
+
+  return {
+    ...parsed,
+    auditObservations: assignment.auditObservations || parsed.auditObservations || "",
+    auditRecommendations: assignment.auditRecommendations || parsed.auditRecommendations || "",
+    auditDocumentation: assignment.auditDocumentation || parsed.auditDocumentation || "",
+  };
+};
 
 const assignmentAuditor = (assignment = {}) => ({
   name: assignment.auditorName || assignment.name || "",
@@ -114,7 +124,9 @@ const assignmentForType = (assignments = [], auditorType = "") =>
 
 const buildAcademicPartEReview = (draft = {}, history = []) => {
   const status = normalizeStatus(draft.overallStatus || draft.status);
-  if (status !== "approved") return null;
+  if (status !== "approved") {
+    return { isApproved: false };
+  }
 
   const reportCategory = normalizeCategory(draft.reportCategory || draft.cycleType);
   const assignments = Array.isArray(draft.auditorAssignments) ? draft.auditorAssignments : [];
@@ -126,27 +138,31 @@ const buildAcademicPartEReview = (draft = {}, history = []) => {
       normalizeCategory(entry.reportCategory || entry.cycleType) === "internal" ||
       (reportCategory === "external" && Number(entry.version || 0) < Number(draft.version || 0))
     ) &&
-    hasAcademicPartEValues(entry.values)
+    (hasAcademicPartEValues(entry.values) || (entry.auditorAssignments && entry.auditorAssignments.length > 0))
   );
+
   const currentHasPartE = hasAcademicPartEValues(draft.values);
+  const previousInternalAssignments = Array.isArray(previousInternal?.auditorAssignments) ? previousInternal.auditorAssignments : [];
+  const previousInternalAssignment = assignmentForType(previousInternalAssignments, "internal");
+
   const internalValues =
     internalAssignment ? normalizedAssignmentValues(internalAssignment) :
+    previousInternalAssignment ? normalizedAssignmentValues(previousInternalAssignment) :
     reportCategory === "internal" && currentHasPartE ? draft.values :
     previousInternal?.values || {};
+
   const externalValues =
     externalAssignment ? normalizedAssignmentValues(externalAssignment) :
     reportCategory === "external" && currentHasPartE ? draft.values :
     {};
 
-  if (!hasAcademicPartEValues(internalValues) && !hasAcademicPartEValues(externalValues) && !String(draft.remarks || "").trim()) {
-    return null;
-  }
-
   return {
+    isApproved: true,
     reportCategory,
     internalValues,
     externalValues,
     iqacRemarks: draft.remarks || "",
+    previousIqacRemarks: previousInternal?.remarks || "",
     internalAuditor: internalAssignment ? assignmentAuditor(internalAssignment) : getAuditorSignOff(previousInternal || draft),
     externalAuditor: externalAssignment ? assignmentAuditor(externalAssignment) : getAuditorSignOff(draft),
   };

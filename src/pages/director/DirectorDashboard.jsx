@@ -5,10 +5,7 @@ import AppSidebar from "../../features/schoolAppraisal/components/AppSidebar";
 import { academicAudit2025Schema } from "../../features/schoolAppraisal/formSchemas";
 import { scrollPageToTop } from "../../utils/scrollToTop";
 
-const directorAuditSchema = {
-  ...academicAudit2025Schema,
-  sections: academicAudit2025Schema.sections.filter((section) => section.id !== "part-e-observations"),
-};
+const directorAuditSchema = academicAudit2025Schema;
 
 export default function DirectorDashboard() {
   const navigate = useNavigate();

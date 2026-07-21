@@ -167,6 +167,17 @@ function PartEAuditorBlock({ title, fields, values, auditor }) {
 }
 
 function AcademicPartEReviewPanel({ fields, review }) {
+  if (!review || review.isApproved === false) {
+    return (
+      <div style={styles.pendingIqacCard}>
+        <div style={styles.pendingIqacTitle}>IQAC Approval Pending</div>
+        <div style={styles.pendingIqacMessage}>
+          IQAC has not approved your form yet. Part E audit observations, recommendations, and IQAC review remarks will be displayed here once your form is reviewed and approved by IQAC.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.partEReviewPanel}>
       <PartEAuditorBlock
@@ -183,10 +194,20 @@ function AcademicPartEReviewPanel({ fields, review }) {
           auditor={review?.externalAuditor}
         />
       )}
+      {review?.previousIqacRemarks && review?.reportCategory === "external" && (
+        <section style={styles.partEReviewBlock}>
+          <div style={styles.partEReviewHeader}>
+            <h3 style={styles.partEReviewTitle}>IQAC Internal Audit Review Remarks</h3>
+          </div>
+          <p style={styles.readOnlyText}>{review.previousIqacRemarks}</p>
+        </section>
+      )}
       {review?.iqacRemarks && (
         <section style={styles.partEReviewBlock}>
           <div style={styles.partEReviewHeader}>
-            <h3 style={styles.partEReviewTitle}>IQAC Review Remarks</h3>
+            <h3 style={styles.partEReviewTitle}>
+              {review?.reportCategory === "external" ? "IQAC External Audit Review Remarks" : "IQAC Review Remarks"}
+            </h3>
           </div>
           <p style={styles.readOnlyText}>{review.iqacRemarks}</p>
         </section>
@@ -200,15 +221,7 @@ export default function AuditSection({ section, values, tables, onFieldChange, o
     ...(section.fields?.length ? [{ type: "fields", fields: section.fields }] : []),
     ...(section.tables?.length ? [{ type: "tables", tables: section.tables }] : []),
   ];
-  const showAcademicPartEReview =
-    readOnly &&
-    section.id === ACADEMIC_PART_E_SECTION_ID &&
-    academicPartEReview &&
-    (
-      hasPartEValues(academicPartEReview.internalValues) ||
-      hasPartEValues(academicPartEReview.externalValues) ||
-      String(academicPartEReview.iqacRemarks || "").trim()
-    );
+  const isPartESection = section.id === ACADEMIC_PART_E_SECTION_ID;
 
   return (
     <section className="audit-section-card" id={section.id} style={styles.section}>
@@ -218,7 +231,7 @@ export default function AuditSection({ section, values, tables, onFieldChange, o
 
       {blocks.map((block, index) => {
         if (block.type === "fields") {
-          if (showAcademicPartEReview) {
+          if (isPartESection) {
             return <AcademicPartEReviewPanel key={`part-e-review-${index}`} fields={block.fields} review={academicPartEReview} />;
           }
 
@@ -323,6 +336,26 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: 14,
+  },
+  pendingIqacCard: {
+    padding: "20px 24px",
+    border: "1px solid #fed7aa",
+    borderRadius: 12,
+    background: "#fff7ed",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  pendingIqacTitle: {
+    color: "#c2410c",
+    fontSize: 15,
+    fontWeight: 750,
+  },
+  pendingIqacMessage: {
+    color: "#9a3412",
+    fontSize: 13.5,
+    lineHeight: 1.5,
+    fontWeight: 500,
   },
   partEReviewPanel: {
     display: "flex",
