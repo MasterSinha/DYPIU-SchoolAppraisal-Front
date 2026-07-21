@@ -119,11 +119,12 @@ export default function AdministrativeReportPanel({
   meta,
   modules,
   data,
-  onClose,
   reportCategory = "",
   auditorAssignments = [],
   currentAuditor = {},
   previousInternalAuditor = {},
+  iqacRemarks = "",
+  onClose,
 }) {
   const submittedAuditorAssignments = auditorAssignments.filter(isSubmittedAuditorAssignment);
   return (
@@ -254,6 +255,7 @@ export default function AdministrativeReportPanel({
           reportCategory={reportCategory}
           currentAuditor={currentAuditor}
           previousInternalAuditor={previousInternalAuditor}
+          iqacRemarks={iqacRemarks}
         />
       </div>
     </div>
@@ -318,6 +320,7 @@ function CertificationSignOff({
   reportCategory = "",
   currentAuditor = {},
   previousInternalAuditor = {},
+  iqacRemarks = "",
 }) {
   const submittedBy = signOff?.submittedBy || {};
   const storedAuditor = signOff?.auditedBy || signOff?.auditorBy || {};
@@ -347,6 +350,16 @@ function CertificationSignOff({
       <div style={styles.signatureBlock}>
         <h3 style={styles.signerTitle}>Approved by {approverLabel(approvedBy.role)}</h3>
         <SignerDetails signer={approvedBy} pendingText="Pending approval" />
+        {iqacRemarks && (
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", color: "#475569", display: "block", marginBottom: 4 }}>
+              IQAC Review Remarks
+            </span>
+            <span style={{ fontSize: 13, color: "#1e293b", whiteSpace: "pre-wrap" }}>
+              {iqacRemarks}
+            </span>
+          </div>
+        )}
       </div>
     </section>
   );

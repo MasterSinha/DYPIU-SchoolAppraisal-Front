@@ -2498,6 +2498,7 @@ function FullFormReview({
               currentAuditor={currentAuditor}
               previousInternalAuditor={previousInternalAuditor}
               previousInternalValues={previousInternalReport?.values}
+              iqacRemarks={submission.remarks}
               previousInternalMeta={
                 previousInternalReport
                   ? `${titleCase(previousInternalReport.reportCategory || "internal")} Audit - ${previousInternalReport.auditCycle} - V${previousInternalReport.version}`
@@ -2514,6 +2515,7 @@ function FullFormReview({
             auditorAssignments={submission.auditorAssignments || []}
             currentAuditor={currentAuditor}
             previousInternalAuditor={previousInternalAuditor}
+            iqacRemarks={submission.remarks}
             onClose={() => setReportMode(false)}
           />
         )}
@@ -2629,6 +2631,27 @@ function FullFormReview({
                 <div style={styles.readOnlyReviewNotice}>
                   This approved report is an immutable historical Version {submission.version}.
                 </div>
+                {submission.remarks && (
+                  <div style={{ marginTop: 16, marginBottom: 16 }}>
+                    <label style={styles.remarksLabel}>IQAC Review Remarks</label>
+                    <div
+                      style={{
+                        padding: "14px 16px",
+                        background: "#f8fafc",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: 8,
+                        fontSize: 14,
+                        lineHeight: 1.6,
+                        color: "#0f172a",
+                        fontWeight: 500,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {submission.remarks}
+                    </div>
+                  </div>
+                )}
                 <div style={styles.finalActionRow}>
                   <span style={styles.reviewHint}>
                     {titleCase(submission.reportCategory || "unclassified")} Audit · {submission.auditCycle}
